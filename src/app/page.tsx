@@ -1,65 +1,172 @@
-import Image from "next/image";
+import Image from 'next/image'
+import StepDemo from '@/components/StepDemo'
 
-export default function Home() {
+const inputOptions = [
+  {
+    title: 'Type it',
+    body: 'Use a friendly equation builder to type any expression, formula, or word problem.',
+    color: 'var(--blue)',
+  },
+  {
+    title: 'Upload it',
+    body: 'Drop in a screenshot or photo of your homework — worksheets, textbook pages, or graphs.',
+    color: 'var(--coral)',
+  },
+  {
+    title: 'Snap it',
+    body: 'Use your camera to capture a problem right from the page in front of you.',
+    color: 'var(--green)',
+  },
+]
+
+export default function HomePage() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
+    <div>
+      {/* HERO */}
+      <section
+        style={{
+          maxWidth: 720,
+          margin: '0 auto',
+          padding: '56px 24px 32px',
+          textAlign: 'center',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 18,
+        }}
+      >
         <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
+          src="/logo.png"
+          alt="Mathful Minds"
+          width={420}
+          height={346}
           priority
+          style={{ width: '100%', maxWidth: 420, height: 'auto' }}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+        <p
+          style={{
+            marginTop: 4,
+            fontFamily: 'var(--font-display)',
+            fontWeight: 600,
+            fontSize: 18,
+            color: 'var(--ink-soft)',
+          }}
+        >
+          Think Mathfully
+        </p>
+      </section>
+
+      {/* INPUT OPTIONS */}
+      <section
+        style={{
+          maxWidth: 900,
+          margin: '0 auto',
+          padding: '0 24px 56px',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: 16,
+        }}
+      >
+        {inputOptions.map((opt) => (
+          <div
+            key={opt.title}
+            style={{
+              background: 'var(--card)',
+              border: '1px solid var(--line)',
+              borderRadius: 14,
+              padding: '22px 18px',
+              borderTop: `3px solid ${opt.color}`,
+            }}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <h3
+              style={{
+                margin: '0 0 6px',
+                fontFamily: 'var(--font-display)',
+                fontWeight: 700,
+                fontSize: 19,
+              }}
+            >
+              {opt.title}
+            </h3>
+            <p style={{ margin: 0, fontSize: 14, color: 'var(--ink-soft)', lineHeight: 1.5 }}>
+              {opt.body}
+            </p>
+          </div>
+        ))}
+      </section>
+
+      {/* SIGNATURE DEMO */}
+      <section style={{ maxWidth: 900, margin: '0 auto', padding: '0 24px 64px' }}>
+        <p
+          style={{
+            textAlign: 'center',
+            fontSize: 13,
+            fontWeight: 700,
+            letterSpacing: '0.05em',
+            textTransform: 'uppercase',
+            color: 'var(--ink-soft)',
+            marginBottom: 14,
+            fontFamily: 'var(--font-body)',
+          }}
+        >
+          See it in action — answer each step to reveal the next
+        </p>
+        <StepDemo />
+      </section>
+
+      {/* DUAL AUDIENCE */}
+      <section
+        style={{
+          background: 'var(--card)',
+          borderTop: '1px solid var(--line)',
+          borderBottom: '1px solid var(--line)',
+          padding: '56px 24px',
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 900,
+            margin: '0 auto',
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 40,
+          }}
+        >
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 24, marginBottom: 12 }}>
+              For Students
+            </h2>
+            <ul style={{ paddingLeft: 18, color: 'var(--ink-soft)', lineHeight: 1.8, fontSize: 14.5 }}>
+              <li>Instant feedback at every step of the problem.</li>
+              <li>Find the key numbers, words, and phrases first.</li>
+              <li>A two-column layout that&apos;s easy to follow.</li>
+              <li>Concise, teacher-made solutions.</li>
+            </ul>
+          </div>
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 24, marginBottom: 12 }}>
+              For Teachers &amp; Parents
+            </h2>
+            <ul style={{ paddingLeft: 18, color: 'var(--ink-soft)', lineHeight: 1.8, fontSize: 14.5 }}>
+              <li>A virtual tutor for any homework question.</li>
+              <li>Saves time and frustration.</li>
+              <li>Teacher-made solutions students understand.</li>
+              <li>Peace of mind — AI as a learning tool, not a shortcut.</li>
+            </ul>
+          </div>
         </div>
-      </main>
+      </section>
+
+      <footer
+        style={{
+          textAlign: 'center',
+          padding: '28px 24px',
+          fontSize: 12.5,
+          color: 'var(--ink-soft)',
+        }}
+      >
+        © {new Date().getFullYear()} Mathful Minds
+      </footer>
     </div>
-  );
+  )
 }
