@@ -101,14 +101,14 @@ export function buildSolverInstance(
     stepBRow = { cells: assembleRow(setupExpr1, setupExpr2, divRhs, orientation) };
     stepBPrompt = `What undoes multiplying ${variableSymbol} by ${a}?`;
     stepBChoices = [
-      { text: `Divide both sides by ${a}`, isCorrect: true, misconceptionTag: null },
+      { text: `Dividing both sides by ${a}`, isCorrect: true, misconceptionTag: null },
       {
-        text: `Multiply both sides by ${a}`,
+        text: `Multiplying both sides by ${a}`,
         isCorrect: false,
         misconceptionTag: "confuses_additive_and_multiplicative_inverse",
       },
       {
-        text: `Divide both sides by ${Math.abs(b)}`,
+        text: `Dividing both sides by ${Math.abs(b)}`,
         isCorrect: false,
         misconceptionTag: "targets_wrong_term_first",
       },
@@ -129,14 +129,14 @@ export function buildSolverInstance(
     stepBRow = { cells: assembleRow(setupExpr1, setupExpr2, multipliedConstant, orientation) };
     stepBPrompt = `What undoes dividing ${variableSymbol} by ${a}?`;
     stepBChoices = [
-      { text: `Multiply both sides by ${a}`, isCorrect: true, misconceptionTag: null },
+      { text: `Multiplying both sides by ${a}`, isCorrect: true, misconceptionTag: null },
       {
-        text: `Divide both sides by ${a}`,
+        text: `Dividing both sides by ${a}`,
         isCorrect: false,
         misconceptionTag: "confuses_additive_and_multiplicative_inverse",
       },
       {
-        text: `Multiply both sides by ${Math.abs(b)}`,
+        text: `Multiplying both sides by ${Math.abs(b)}`,
         isCorrect: false,
         misconceptionTag: "targets_wrong_term_first",
       },
@@ -155,8 +155,8 @@ export function buildSolverInstance(
   const stepAChoices: Choice[] = [
     {
       text: constantIsPositive
-        ? `Subtract ${Math.abs(b)} from both sides`
-        : `Add ${Math.abs(b)} to both sides`,
+        ? `Subtracting ${Math.abs(b)} from both sides`
+        : `Adding ${Math.abs(b)} to both sides`,
       isCorrect: true,
       misconceptionTag: null,
     },
@@ -167,8 +167,8 @@ export function buildSolverInstance(
     },
     {
       text: constantIsPositive
-        ? `Add ${Math.abs(b)} to both sides`
-        : `Subtract ${Math.abs(b)} from both sides`,
+        ? `Adding ${Math.abs(b)} to both sides`
+        : `Subtracting ${Math.abs(b)} from both sides`,
       isCorrect: false,
       misconceptionTag: "flipped_the_operation",
     },

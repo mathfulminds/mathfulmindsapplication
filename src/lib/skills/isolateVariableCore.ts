@@ -83,3 +83,36 @@ export function assembleRow(
 export function eqColumnIndexFor(orientation: Orientation): 1 | 2 {
   return orientation === "expressionLeft" ? 2 : 1;
 }
+
+// Plain-text fraction display for use in MCQ prompts and choice labels,
+// which render as ordinary HTML text (not through KaTeX). Using LaTeX
+// syntax like "\dfrac{1}{3}" here would show up as literal source code,
+// not an actual rendered fraction - this avoids that entirely.
+export function plainFraction(numerator: number, denominator: number): string {
+  if (numerator < 0) return `-${Math.abs(numerator)}/${denominator}`;
+  return `${numerator}/${denominator}`;
+}
+
+export function plainReciprocal(n: number, d: number): string {
+  if (n < 0) return `-${d}/${Math.abs(n)}`;
+  return `${d}/${n}`;
+}
+
+export function renderFractionTerm(
+  n: number,
+  d: number,
+  symbol: string,
+  forceSign: boolean = false
+): string {
+  const abs = Math.abs(n);
+  const frac = `\\dfrac{${abs}}{${d}}${symbol}`;
+  if (n < 0) return `-${frac}`;
+  return forceSign ? `+\\,${frac}` : frac;
+}
+
+// Reciprocal of n/d, rendered as its own signed fraction (not simplified),
+// e.g. reciprocal of -2/3 is displayed as -3/2, not as a decimal.
+export function renderReciprocal(n: number, d: number): string {
+  if (n < 0) return `-\\dfrac{${d}}{${Math.abs(n)}}`;
+  return `\\dfrac{${d}}{${n}}`;
+}

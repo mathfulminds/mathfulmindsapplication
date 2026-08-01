@@ -13,6 +13,26 @@ function Cell({ math, color }: { math: string; color: string }) {
   );
 }
 
+// Renders a string that may contain inline KaTeX segments marked with
+// $...$ (e.g. "Multiply both sides by $\\dfrac{3}{2}$"). Plain text
+// outside the $ markers renders as ordinary text; content inside renders
+// as real math. Strings with no $ markers at all render as plain text
+// unchanged - fully backward compatible with every existing skill.
+function MixedText({ content }: { content: string }) {
+  const parts = content.split(/(\$[^$]+\$)/g).filter((p) => p.length > 0);
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.startsWith("$") && part.endsWith("$") ? (
+          <InlineMath key={i} math={part.slice(1, -1)} />
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </>
+  );
+}
+
 function EquationGrid({ rows, eqColumnIndex }: { rows: GridRow[]; eqColumnIndex: number }) {
   return (
     <div
@@ -172,7 +192,7 @@ export default function StepSolver({
               fontWeight: 600,
             }}
           >
-            ✓ {currentStep.explanationOnCorrect}
+            ✓ <MixedText content={currentStep.explanationOnCorrect} />
           </div>
         )}
       </div>
@@ -202,7 +222,7 @@ export default function StepSolver({
               Step {stepIndex + 1} of {instance.steps.length}
             </div>
             <p style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
-              {currentStep.prompt}
+              <MixedText content={currentStep.prompt} />
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {currentStep.choices.map((choice, i) => {
@@ -234,7 +254,7 @@ export default function StepSolver({
                       color: "var(--ink)",
                     }}
                   >
-                    {choice.text}
+                    <MixedText content={choice.text} />
                   </button>
                 );
               })}

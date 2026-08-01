@@ -104,8 +104,8 @@ export function buildOneStepInstance(
     const stepOneChoices: Choice[] = [
       {
         text: constantIsPositive
-          ? `Subtract ${Math.abs(b)} from both sides`
-          : `Add ${Math.abs(b)} to both sides`,
+          ? `Subtracting ${Math.abs(b)} from both sides`
+          : `Adding ${Math.abs(b)} to both sides`,
         isCorrect: true,
         misconceptionTag: null,
       },
@@ -116,8 +116,8 @@ export function buildOneStepInstance(
       },
       {
         text: constantIsPositive
-          ? `Add ${Math.abs(b)} to both sides`
-          : `Subtract ${Math.abs(b)} from both sides`,
+          ? `Adding ${Math.abs(b)} to both sides`
+          : `Subtracting ${Math.abs(b)} from both sides`,
         isCorrect: false,
         misconceptionTag: "flipped_the_operation",
       },
@@ -187,14 +187,14 @@ export function buildOneStepInstance(
     stepRow = { cells: assembleRow(divSetup, BLANK, divRhs, orientation) };
     prompt = `What undoes multiplying ${variableSymbol} by ${a}?`;
     choices = [
-      { text: `Divide both sides by ${a}`, isCorrect: true, misconceptionTag: null },
+      { text: `Dividing both sides by ${a}`, isCorrect: true, misconceptionTag: null },
       {
-        text: `Multiply both sides by ${a}`,
+        text: `Multiplying both sides by ${a}`,
         isCorrect: false,
         misconceptionTag: "confuses_additive_and_multiplicative_inverse",
       },
       {
-        text: `Add ${a} to both sides`,
+        text: `Adding ${a} to both sides`,
         isCorrect: false,
         misconceptionTag: "confuses_additive_and_multiplicative_inverse",
       },
@@ -212,14 +212,14 @@ export function buildOneStepInstance(
     stepRow = { cells: assembleRow(multipliedVarTerm, BLANK, multipliedConstant, orientation) };
     prompt = `What undoes dividing ${variableSymbol} by ${a}?`;
     choices = [
-      { text: `Multiply both sides by ${a}`, isCorrect: true, misconceptionTag: null },
+      { text: `Multiplying both sides by ${a}`, isCorrect: true, misconceptionTag: null },
       {
-        text: `Divide both sides by ${a}`,
+        text: `Dividing both sides by ${a}`,
         isCorrect: false,
         misconceptionTag: "confuses_additive_and_multiplicative_inverse",
       },
       {
-        text: `Add ${a} to both sides`,
+        text: `Adding ${a} to both sides`,
         isCorrect: false,
         misconceptionTag: "confuses_additive_and_multiplicative_inverse",
       },
