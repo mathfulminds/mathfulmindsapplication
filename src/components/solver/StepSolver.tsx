@@ -1,23 +1,150 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { InlineMath } from "react-katex";
 import "katex/dist/katex.min.css";
 import type { GridRow, SolverInstance } from "@/lib/skills/types";
 
-function Cell({ math, color }: { math: string; color: string }) {
+const PLAINTEXT_PREFIX = "PLAINTEXT:";
+const NUMBER_START = "\u0003";
+const NUMBER_END = "\u0004";
+const OVERLINE_START = "\u0001";
+const OVERLINE_END = "\u0002";
+
+// Renders one number's contents (already stripped of the outer NUMBER_
+// START/END markers) through REAL KaTeX, guaranteeing it matches the size
+// and font of every other KaTeX-rendered value on the page exactly - no
+// guessed font-size multiplier needed. Only the repeating digits (marked
+// by OVERLINE_START/END) get pulled out and wrapped in our own CSS
+// border-top, since KaTeX's own \overline command has a documented bug
+// where the bar sometimes silently fails to draw.
+function renderNumber(numberText: string, key: number): ReactNode {
+  const olStart = numberText.indexOf(OVERLINE_START);
+  const olEnd = numberText.indexOf(OVERLINE_END);
+  if (olStart === -1 || olEnd === -1) {
+    return <InlineMath key={key} math={numberText} />;
+  }
+  const before = numberText.slice(0, olStart);
+  const overlined = numberText.slice(olStart + 1, olEnd);
+  const after = numberText.slice(olEnd + 1);
   return (
-    <div style={{ textAlign: "center", color }}>
-      <InlineMath math={math} />
+    <span key={key} style={{ display: "inline-flex", alignItems: "baseline" }}>
+      {before.length > 0 && <InlineMath math={before} />}
+      <span
+        style={{
+          borderTop: "0.09em solid currentColor",
+          paddingTop: "0.08em",
+        }}
+      >
+        <InlineMath math={overlined} />
+      </span>
+      {after.length > 0 && <InlineMath math={after} />}
+    </span>
+  );
+}
+
+// Splits arbitrary text on the NUMBER_START/END markers. Everything
+// outside them renders as plain text in whatever font it naturally
+// inherits (the site's normal UI font); everything inside renders as real
+// KaTeX via renderNumber. This is what lets an MCQ choice like
+// "Subtracting 8.18 from both sides" show "8.18" in proper math styling
+// while the surrounding English stays in the UI font, not the other way
+// around.
+function renderTextWithEmbeddedNumbers(text: string): ReactNode {
+  const nodes: ReactNode[] = [];
+  let remaining = text;
+  let key = 0;
+  while (remaining.length > 0) {
+    const startIdx = remaining.indexOf(NUMBER_START);
+    if (startIdx === -1) {
+      nodes.push(<span key={key++}>{remaining}</span>);
+      break;
+    }
+    if (startIdx > 0) {
+      nodes.push(<span key={key++}>{remaining.slice(0, startIdx)}</span>);
+    }
+    const endIdx = remaining.indexOf(NUMBER_END, startIdx);
+    if (endIdx === -1) {
+      nodes.push(<span key={key++}>{remaining.slice(startIdx)}</span>);
+      break;
+    }
+    nodes.push(renderNumber(remaining.slice(startIdx + 1, endIdx), key++));
+    remaining = remaining.slice(endIdx + 1);
+  }
+  return <>{nodes}</>;
+}
+
+const STACKEDFRACTION_PREFIX = "STACKEDFRACTION:";
+const STACK_SEPARATOR = "\u0005";
+
+// Builds a fraction-bar LAYOUT ourselves (two stacked rows, divider in
+// between) instead of using KaTeX's own \dfrac. This is specifically for
+// cases where the numerator might contain a repeating decimal - nesting
+// that inside a real \dfrac would require KaTeX's own \overline again,
+// which is the very thing we're avoiding. The denominator here is always
+// a plain whole number for this skill, so it renders directly via KaTeX.
+function renderStackedFraction(content: string, color: string): ReactNode {
+  const sepIdx = content.indexOf(STACK_SEPARATOR);
+  if (sepIdx === -1) return renderTextWithEmbeddedNumbers(content);
+  const numeratorRaw = content.slice(0, sepIdx);
+  const denominator = content.slice(sepIdx + 1);
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        flexDirection: "column",
+        alignItems: "center",
+        verticalAlign: "middle",
+      }}
+    >
+      <span style={{ paddingBottom: "0.15em" }}>
+        {renderTextWithEmbeddedNumbers(numeratorRaw)}
+      </span>
+      <span
+        style={{
+          borderTop: `0.06em solid ${color}`,
+          alignSelf: "stretch",
+        }}
+      />
+      <span style={{ paddingTop: "0.15em" }}>
+        <InlineMath math={denominator} />
+      </span>
+    </span>
+  );
+}
+
+function Cell({ math, color }: { math: string; color: string }) {
+  const isPlainText = math.startsWith(PLAINTEXT_PREFIX);
+  const isStackedFraction = math.startsWith(STACKEDFRACTION_PREFIX);
+  return (
+    <div
+      style={{
+        textAlign: "center",
+        color,
+        overflow: "visible",
+        lineHeight: 1.8,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {isStackedFraction ? (
+        renderStackedFraction(math.slice(STACKEDFRACTION_PREFIX.length), color)
+      ) : isPlainText ? (
+        renderTextWithEmbeddedNumbers(math.slice(PLAINTEXT_PREFIX.length))
+      ) : (
+        <InlineMath math={math} />
+      )}
     </div>
   );
 }
 
 // Renders a string that may contain inline KaTeX segments marked with
 // $...$ (e.g. "Multiply both sides by $\\dfrac{3}{2}$"). Plain text
-// outside the $ markers renders as ordinary text; content inside renders
-// as real math. Strings with no $ markers at all render as plain text
-// unchanged - fully backward compatible with every existing skill.
+// outside the $ markers renders as ordinary text in the normal UI font;
+// content inside $ renders as real math. Plain segments are further
+// checked for embedded NUMBER_START/END-marked numbers (see
+// renderTextWithEmbeddedNumbers), since decimal values can appear inside
+// otherwise-ordinary prompt/choice sentences.
 function MixedText({ content }: { content: string }) {
   const parts = content.split(/(\$[^$]+\$)/g).filter((p) => p.length > 0);
   return (
@@ -26,7 +153,7 @@ function MixedText({ content }: { content: string }) {
         part.startsWith("$") && part.endsWith("$") ? (
           <InlineMath key={i} math={part.slice(1, -1)} />
         ) : (
-          <span key={i}>{part}</span>
+          <span key={i}>{renderTextWithEmbeddedNumbers(part)}</span>
         )
       )}
     </>
@@ -35,33 +162,40 @@ function MixedText({ content }: { content: string }) {
 
 function EquationGrid({ rows, eqColumnIndex }: { rows: GridRow[]; eqColumnIndex: number }) {
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(4, auto)",
-        width: "fit-content",
-        columnGap: 14,
-        rowGap: 16,
-        alignItems: "center",
-        fontSize: 21,
-      }}
-    >
-      {rows.flatMap((row, rowIndex) => {
-        const color = row.highlight === "success" ? "var(--green)" : "var(--ink)";
-        return row.cells.map((cellValue, colIndex) =>
-          colIndex === eqColumnIndex ? (
-            <div
-              key={`${rowIndex}-${colIndex}`}
-              style={{ textAlign: "center", color: "var(--ink-soft)", fontSize: 18 }}
-            >
-              {cellValue}
-            </div>
-          ) : (
-            <Cell key={`${rowIndex}-${colIndex}`} math={cellValue} color={color} />
-          )
-        );
-      })}
-    </div>
+    <div style={{ overflowX: "auto", width: "100%", paddingTop: 14, paddingBottom: 4 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, auto)",
+          width: "fit-content",
+          columnGap: 14,
+          rowGap: 20,
+          alignItems: "center",
+          fontSize: 21,
+        }}
+      >
+          {rows.flatMap((row, rowIndex) => {
+            const color = row.highlight === "success" ? "var(--green)" : "var(--ink)";
+            return row.cells.map((cellValue, colIndex) =>
+              colIndex === eqColumnIndex ? (
+                <div
+                  key={`${rowIndex}-${colIndex}`}
+                  style={{
+                    textAlign: "center",
+                    color: "var(--ink-soft)",
+                    fontSize: 18,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {cellValue}
+                </div>
+              ) : (
+                <Cell key={`${rowIndex}-${colIndex}`} math={cellValue} color={color} />
+              )
+            );
+          })}
+        </div>
+      </div>
   );
 }
 
@@ -148,16 +282,33 @@ export default function StepSolver({
   }
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr",
-        border: "1px solid var(--line)",
-        borderRadius: 16,
-        overflow: "hidden",
-        background: "var(--card)",
-      }}
-    >
+    <>
+      {/* Tailwind's global reset sets `border: 0 solid` on every element via
+          a universal selector, which silently zeroes out the border-based
+          lines KaTeX uses internally for overline/underline/fraction bars.
+          This forces those specific KaTeX elements back to their intended
+          width, with !important to guarantee it wins regardless of the
+          Tailwind/KaTeX stylesheet load order. */}
+      <style>{`
+        .katex .overline .overline-line,
+        .katex .underline .underline-line,
+        .katex .frac-line,
+        .katex .rule {
+          border-bottom-width: 0.04em !important;
+          border-bottom-style: solid !important;
+          border-bottom-color: currentColor !important;
+        }
+      `}</style>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          border: "1px solid var(--line)",
+          borderRadius: 16,
+          overflow: "hidden",
+          background: "var(--card)",
+        }}
+      >
       {/* LEFT: math */}
       <div
         style={{
@@ -221,7 +372,7 @@ export default function StepSolver({
             >
               Step {stepIndex + 1} of {instance.steps.length}
             </div>
-            <p style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
+            <p style={{ margin: 0, fontSize: 16, fontWeight: 700, overflow: "visible", lineHeight: 1.8 }}>
               <MixedText content={currentStep.prompt} />
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -235,7 +386,7 @@ export default function StepSolver({
                     onClick={() => handleChoice(i)}
                     style={{
                       textAlign: "left",
-                      padding: "10px 14px",
+                      padding: "16px 14px 10px 14px",
                       borderRadius: 10,
                       border: `1.5px solid ${
                         showRight
@@ -252,6 +403,9 @@ export default function StepSolver({
                       cursor: revealed ? "default" : "pointer",
                       fontSize: 14,
                       color: "var(--ink)",
+                      lineHeight: 1.6,
+                      whiteSpace: "nowrap",
+                      overflowX: "auto",
                     }}
                   >
                     <MixedText content={choice.text} />
@@ -301,5 +455,6 @@ export default function StepSolver({
         )}
       </div>
     </div>
+    </>
   );
 }
