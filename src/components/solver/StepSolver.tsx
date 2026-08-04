@@ -7,10 +7,161 @@ import "katex/dist/katex.min.css";
 import type { GridRow, SolverInstance } from "@/lib/skills/types";
 
 const PLAINTEXT_PREFIX = "PLAINTEXT:";
+const GRAPH_PREFIX = "GRAPH:";
 const NUMBER_START = "\u0003";
 const NUMBER_END = "\u0004";
 const OVERLINE_START = "\u0001";
 const OVERLINE_END = "\u0002";
+
+// Renders a choice encoded as "GRAPH:{boundary}|{left|right}|{0|1}" (see
+// graphChoiceText in inequalityCore.ts) as a small SVG number line instead
+// of text. This file stays skill-agnostic on purpose - it only knows the
+// GRAPH: prefix protocol, the same way it only knows the PLAINTEXT:/
+// STACKEDFRACTION: protocols below, without importing anything from a
+// specific skill file.
+const FRACLABEL_PREFIX = "FRACLABEL:";
+
+// Renders a graph label. Three cases:
+//   - plain text (a whole number, or unused here but harmless otherwise)
+//   - decimal text containing OVERLINE_START/END markers (a repeating
+//     portion), rendered via SVG's text-decoration:overline on a <tspan> -
+//     the SVG equivalent of the CSS border-top trick renderNumber uses in
+//     the main grid, for the same reason: KaTeX's own \overline has a
+//     documented bug, and there's no KaTeX involved here regardless since
+//     this is a small standalone SVG, not a grid cell.
+//   - "FRACLABEL:{sign}{num}/{den}", a real stacked numerator-over-
+//     denominator fraction (matching how fractions look everywhere else
+//     in the app, rather than "11/8" plain-text slash notation). A <line>
+//     can't nest inside a <text> element the way a <tspan> can, so this
+//     case returns its own group of sibling <text>/<line> elements
+//     instead of contributing to a single shared <text> the way the other
+//     two cases do.
+function GraphLabel({ text, x, y }: { text: string; x: number; y: number }) {
+  if (text.startsWith(FRACLABEL_PREFIX)) {
+    const raw = text.slice(FRACLABEL_PREFIX.length);
+    const negative = raw.startsWith("-");
+    const body = negative ? raw.slice(1) : raw;
+    const [num, den] = body.split("/");
+    const barHalfWidth = 12;
+    return (
+      <>
+        {negative && (
+          <text x={x - barHalfWidth - 8} y={y + 5} textAnchor="middle" fontSize={13} fill="var(--ink-soft)">
+            -
+          </text>
+        )}
+        <text x={x} y={y - 2} textAnchor="middle" fontSize={11} fill="var(--ink-soft)">
+          {num}
+        </text>
+        <line
+          x1={x - barHalfWidth}
+          y1={y + 3}
+          x2={x + barHalfWidth}
+          y2={y + 3}
+          stroke="var(--ink-soft)"
+          strokeWidth={1}
+        />
+        <text x={x} y={y + 17} textAnchor="middle" fontSize={11} fill="var(--ink-soft)">
+          {den}
+        </text>
+      </>
+    );
+  }
+
+  const olStart = text.indexOf(OVERLINE_START);
+  const olEnd = text.indexOf(OVERLINE_END);
+  if (olStart === -1 || olEnd === -1) {
+    return (
+      <text x={x} y={y} textAnchor="middle" fontSize={12} fill="var(--ink-soft)">
+        {text}
+      </text>
+    );
+  }
+  const before = text.slice(0, olStart);
+  const overlined = text.slice(olStart + 1, olEnd);
+  const after = text.slice(olEnd + 1);
+  const fullText = before + overlined + after;
+
+  // A monospace font makes character width predictable, which is what
+  // lets us compute exactly where the overlined substring starts and
+  // ends and draw a real <line> there - the SVG equivalent of the CSS
+  // border-top trick renderNumber uses for the same underlying problem
+  // (KaTeX's \overline vs. here, SVG's text-decoration:overline - neither
+  // renderer's native line-drawing is trustworthy, so both get replaced
+  // with an explicitly drawn line instead).
+  const fontSize = 12;
+  const charWidth = fontSize * 0.6;
+  const totalWidth = fullText.length * charWidth;
+  const startX = x - totalWidth / 2;
+  const overlineX1 = startX + before.length * charWidth;
+  const overlineX2 = overlineX1 + overlined.length * charWidth;
+  const overlineY = y - fontSize;
+
+  return (
+    <>
+      <text x={startX} y={y} textAnchor="start" fontSize={fontSize} fontFamily="monospace" fill="var(--ink-soft)">
+        {fullText}
+      </text>
+      {overlined.length > 0 && (
+        <line x1={overlineX1} y1={overlineY} x2={overlineX2} y2={overlineY} stroke="var(--ink-soft)" strokeWidth={1} />
+      )}
+    </>
+  );
+}
+
+function NumberLineGraph({
+  boundary,
+  direction,
+  inclusive,
+  markerId,
+}: {
+  boundary: string;
+  direction: "left" | "right";
+  inclusive: boolean;
+  markerId: string;
+}) {
+  const centerX = 80;
+  const y = 24;
+  const edgeX = direction === "right" ? 146 : 14;
+  return (
+    <svg viewBox="0 0 160 72" style={{ width: "100%", maxWidth: 200, display: "block" }}>
+      <defs>
+        <marker id={markerId} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="currentColor" />
+        </marker>
+      </defs>
+      <line x1={8} y1={y} x2={152} y2={y} stroke="var(--line)" strokeWidth={1.5} />
+      <line
+        x1={centerX}
+        y1={y}
+        x2={edgeX}
+        y2={y}
+        stroke="currentColor"
+        strokeWidth={3}
+        markerEnd={`url(#${markerId})`}
+      />
+      <circle
+        cx={centerX}
+        cy={y}
+        r={6}
+        fill={inclusive ? "currentColor" : "#fff"}
+        stroke="currentColor"
+        strokeWidth={2.5}
+      />
+      <GraphLabel text={boundary} x={centerX} y={y + 20} />
+    </svg>
+  );
+}
+
+function parseGraphChoice(text: string): { boundary: string; direction: "left" | "right"; inclusive: boolean } {
+  const raw = text.slice(GRAPH_PREFIX.length);
+  const [boundaryStr, direction, inclusiveStr] = raw.split("|");
+  return {
+    boundary: boundaryStr,
+    direction: direction === "left" ? "left" : "right",
+    inclusive: inclusiveStr === "1",
+  };
+}
 
 // Renders one number's contents (already stripped of the outer NUMBER_
 // START/END markers) through REAL KaTeX, guaranteeing it matches the size
@@ -187,7 +338,7 @@ function EquationGrid({ rows, eqColumnIndex }: { rows: GridRow[]; eqColumnIndex:
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {cellValue}
+                  {cellValue.length > 0 ? <InlineMath math={cellValue} /> : null}
                 </div>
               ) : (
                 <Cell key={`${rowIndex}-${colIndex}`} math={cellValue} color={color} />
@@ -380,13 +531,14 @@ export default function StepSolver({
                 const isSelected = selected === i;
                 const showWrong = isSelected && !choice.isCorrect;
                 const showRight = revealed && choice.isCorrect;
+                const isGraph = choice.text.startsWith(GRAPH_PREFIX);
                 return (
                   <button
                     key={i}
                     onClick={() => handleChoice(i)}
                     style={{
-                      textAlign: "left",
-                      padding: "16px 14px 10px 14px",
+                      textAlign: isGraph ? "center" : "left",
+                      padding: isGraph ? "10px 14px" : "16px 14px 10px 14px",
                       borderRadius: 10,
                       border: `1.5px solid ${
                         showRight
@@ -404,11 +556,15 @@ export default function StepSolver({
                       fontSize: 14,
                       color: "var(--ink)",
                       lineHeight: 1.6,
-                      whiteSpace: "nowrap",
-                      overflowX: "auto",
+                      whiteSpace: isGraph ? "normal" : "nowrap",
+                      overflowX: isGraph ? "visible" : "auto",
                     }}
                   >
-                    <MixedText content={choice.text} />
+                    {isGraph ? (
+                      <NumberLineGraph {...parseGraphChoice(choice.text)} markerId={`graph-arrow-${i}`} />
+                    ) : (
+                      <MixedText content={choice.text} />
+                    )}
                   </button>
                 );
               })}
