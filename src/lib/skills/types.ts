@@ -33,6 +33,20 @@ export interface SolverStep {
   prompt: string;
   choices: Choice[];
   explanationOnCorrect: string;
+  // Optional: shows a small reference diagram above the grid,
+  // "coefficient(term1term2)", with an arc from the coefficient to
+  // term1 once the first distribute step is answered, and a second arc
+  // to term2 once the second is also answered. Set this with the SAME
+  // values on both distribute steps in a skill - StepSolver figures out
+  // how many arcs to show from which step is current and whether it's
+  // been revealed. Left undefined for every other kind of step.
+  distributeVisual?: DistributeVisual;
+}
+
+export interface DistributeVisual {
+  coefficient: string; // e.g. "3" or "-6"
+  term1: string; // e.g. "-4x" - original (undistributed) form
+  term2: string; // e.g. "+4" or "-4" - original (undistributed) form
 }
 
 export interface SolverInstance {

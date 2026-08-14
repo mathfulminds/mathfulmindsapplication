@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { InlineMath } from "react-katex";
 import "katex/dist/katex.min.css";
@@ -311,7 +311,144 @@ function MixedText({ content }: { content: string }) {
   );
 }
 
-function EquationGrid({ rows, eqColumnIndex }: { rows: GridRow[]; eqColumnIndex: number }) {
+// Small reference diagram shown above the grid while a distribution
+// step is active. Always displays the ORIGINAL undistributed expression
+// "coefficient(term1term2)" - the grid below independently shows the
+// evolving computed result via the normal row-update mechanism, so this
+// stays a fixed reference rather than needing to track computed values
+// itself. Arcs accumulate: 0 before the first distribute step is
+// answered, 1 once it's answered (coefficient -> term1), 2 once the
+// second is also answered (coefficient -> term2 added, first arc stays).
+//
+// This can't be anchored to the real grid cells the way the graph-step
+// number line or a cross-cell arrow could be: the coefficient and term1
+// deliberately share ONE grid cell (from the column-alignment fix), so
+// there's no second, distinct cell to measure "just the coefficient" vs
+// "just term1" apart from each other. Predictable monospace character
+// widths are the only way to get that sub-cell precision.
+function DistributeDiagram({
+  coefficient,
+  term1,
+  term2,
+  arcsShown,
+}: {
+  coefficient: string;
+  term1: string;
+  term2: string;
+  arcsShown: 0 | 1 | 2;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const coefRef = useRef<HTMLSpanElement | null>(null);
+  const term1Ref = useRef<HTMLSpanElement | null>(null);
+  const term2Ref = useRef<HTMLSpanElement | null>(null);
+  const [measured, setMeasured] = useState<{ coefX: number; term1X: number; term2X: number; y: number } | null>(
+    null
+  );
+
+  // Measures the REAL rendered position of each token - this is safe here
+  // (unlike trying to anchor to a grid cell) because each token is its
+  // own separately-rendered KaTeX element from the start, not a substring
+  // pulled out of one merged blob. Real KaTeX also means "\," and any
+  // other KaTeX syntax in term2 renders correctly instead of showing up
+  // as literal backslash-text, and the font matches the grid exactly
+  // since it's the same InlineMath component rendering both.
+  useLayoutEffect(() => {
+    if (!containerRef.current || !coefRef.current || !term1Ref.current || !term2Ref.current) {
+      setMeasured(null);
+      return;
+    }
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const coefRect = coefRef.current.getBoundingClientRect();
+    const term1Rect = term1Ref.current.getBoundingClientRect();
+    const term2Rect = term2Ref.current.getBoundingClientRect();
+    setMeasured({
+      coefX: coefRect.left + coefRect.width / 2 - containerRect.left,
+      term1X: term1Rect.left + term1Rect.width / 2 - containerRect.left,
+      term2X: term2Rect.left + term2Rect.width / 2 - containerRect.left,
+      y: coefRect.top - containerRect.top,
+    });
+  }, [coefficient, term1, term2]);
+
+  const arcGap = 10;
+  let arc1Path = "";
+  let arc2Path = "";
+  if (measured) {
+    const dist1 = Math.abs(measured.term1X - measured.coefX);
+    const height1 = 8 + dist1 * 0.22;
+    const top1 = measured.y - arcGap - height1;
+    const mid1 = (measured.coefX + measured.term1X) / 2;
+    arc1Path = `M ${measured.coefX} ${measured.y - arcGap} Q ${mid1} ${top1} ${measured.term1X} ${measured.y - arcGap}`;
+
+    const dist2 = Math.abs(measured.term2X - measured.coefX);
+    // Guaranteed clearance over arc 1, not just independently scaled by
+    // distance - two arcs sharing a start point will otherwise cross
+    // unless the taller one is forced to clear the shorter one's peak by
+    // a fixed margin.
+    const height2 = Math.max(height1 + 16, 8 + dist2 * 0.22);
+    const top2 = measured.y - arcGap - height2;
+    const mid2 = (measured.coefX + measured.term2X) / 2;
+    arc2Path = `M ${measured.coefX} ${measured.y - arcGap} Q ${mid2} ${top2} ${measured.term2X} ${measured.y - arcGap}`;
+  }
+
+  return (
+    <div ref={containerRef} style={{ position: "relative", display: "inline-block", paddingTop: 34 }}>
+      {measured && (
+        <svg
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: "100%",
+            height: "100%",
+            overflow: "visible",
+            pointerEvents: "none",
+          }}
+        >
+          <defs>
+            <marker id="distribute-diagram-head" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto">
+              <path d="M0,0 L5,2.5 L0,5 Z" fill="var(--ink-soft)" />
+            </marker>
+          </defs>
+          {arcsShown >= 1 && (
+            <path d={arc1Path} stroke="var(--ink-soft)" strokeWidth={1.3} fill="none" markerEnd="url(#distribute-diagram-head)" />
+          )}
+          {arcsShown >= 2 && (
+            <path d={arc2Path} stroke="var(--ink-soft)" strokeWidth={1.3} fill="none" markerEnd="url(#distribute-diagram-head)" />
+          )}
+        </svg>
+      )}
+      <div style={{ display: "flex", alignItems: "baseline", fontSize: 21 }}>
+        <span ref={coefRef}>
+          <InlineMath math={coefficient} />
+        </span>
+        <InlineMath math="(" />
+        <span ref={term1Ref}>
+          <InlineMath math={term1} />
+        </span>
+        <span ref={term2Ref}>
+          <InlineMath math={term2} />
+        </span>
+        <InlineMath math=")" />
+      </div>
+    </div>
+  );
+}
+
+function EquationGrid({
+  rows,
+  eqColumnIndex,
+  distributeAnnotation,
+}: {
+  rows: GridRow[];
+  eqColumnIndex: number;
+  distributeAnnotation?: {
+    coefficient: string;
+    term1: string;
+    term2: string;
+    arcsShown: 0 | 1 | 2;
+    termCols: [number, number];
+  };
+}) {
   return (
     <div style={{ overflowX: "auto", width: "100%", paddingTop: 14, paddingBottom: 4 }}>
       <div
@@ -327,6 +464,53 @@ function EquationGrid({ rows, eqColumnIndex }: { rows: GridRow[]; eqColumnIndex:
       >
           {rows.flatMap((row, rowIndex) => {
             const color = row.highlight === "success" ? "var(--green)" : "var(--ink)";
+
+            // Row 0 (the original, never-updated expression) gets its two
+            // term columns merged into one spanning cell containing the
+            // arrow diagram, when this problem has one - this is what
+            // makes the arrows sit directly on the actual first line of
+            // the equation instead of floating as a separate duplicate
+            // above the grid. Every other row (including this same slot
+            // pair on later rows, once distribution is complete) renders
+            // normally.
+            if (rowIndex === 0 && distributeAnnotation) {
+              const [startCol] = [...distributeAnnotation.termCols].sort((a, b) => a - b);
+              return row.cells.map((cellValue, colIndex) => {
+                if (colIndex === startCol) {
+                  return (
+                    <div key={`${rowIndex}-${colIndex}`} style={{ gridColumn: `${startCol + 1} / span 2` }}>
+                      <DistributeDiagram
+                        coefficient={distributeAnnotation.coefficient}
+                        term1={distributeAnnotation.term1}
+                        term2={distributeAnnotation.term2}
+                        arcsShown={distributeAnnotation.arcsShown}
+                      />
+                    </div>
+                  );
+                }
+                if (colIndex === startCol + 1) return null; // absorbed into the spanning cell above
+                // Matches DistributeDiagram's own paddingTop:34 exactly,
+                // so these cells sit at the same baseline as the equation
+                // text inside the (now taller) spanning cell, instead of
+                // being centered against the row's full height - which
+                // includes the arc space above that text - and landing
+                // too high.
+                return colIndex === eqColumnIndex ? (
+                  <div key={`${rowIndex}-${colIndex}`} style={{ paddingTop: 34 }}>
+                    <div
+                      style={{ textAlign: "center", color: "var(--ink-soft)", fontSize: 18, whiteSpace: "nowrap" }}
+                    >
+                      {cellValue.length > 0 ? <InlineMath math={cellValue} /> : null}
+                    </div>
+                  </div>
+                ) : (
+                  <div key={`${rowIndex}-${colIndex}`} style={{ paddingTop: 34 }}>
+                    <Cell math={cellValue} color={color} />
+                  </div>
+                );
+              });
+            }
+
             return row.cells.map((cellValue, colIndex) =>
               colIndex === eqColumnIndex ? (
                 <div
@@ -349,7 +533,6 @@ function EquationGrid({ rows, eqColumnIndex }: { rows: GridRow[]; eqColumnIndex:
       </div>
   );
 }
-
 export default function StepSolver({
   generate,
   skillName,
@@ -410,6 +593,32 @@ export default function StepSolver({
   }
 
   const visibleRows: GridRow[] = slotOrder.map((id) => slotContent[id]);
+
+  // If this problem has distribute steps, figure out how many arcs
+  // should be showing based on step POSITION relative to those two
+  // steps, not just the current step's own reveal state - that's what
+  // makes the arcs persist once the user has moved past both distribute
+  // questions, instead of disappearing the moment currentStep becomes
+  // something else.
+  const distributeContent = instance.steps.find((s) => s.distributeVisual)?.distributeVisual;
+  let distributeAnnotation:
+    | { coefficient: string; term1: string; term2: string; arcsShown: 0 | 1 | 2; termCols: [number, number] }
+    | undefined;
+  if (distributeContent) {
+    const idx1 = instance.steps.findIndex((s) => s.stepId === "distribute_first_term");
+    const idx2 = instance.steps.findIndex((s) => s.stepId === "distribute_second_term");
+    let arcsShown: 0 | 1 | 2 = 0;
+    if (idx1 !== -1 && idx2 !== -1) {
+      if (stepIndex < idx1) arcsShown = 0;
+      else if (stepIndex === idx1) arcsShown = revealed ? 1 : 0;
+      else if (stepIndex === idx2) arcsShown = revealed ? 2 : 1;
+      else arcsShown = 2; // past both - stays at 2 regardless of later steps' own reveal state
+    }
+    // eqColumnIndex is 2 for expressionLeft (term cells at 0,1) or 1 for
+    // expressionRight (term cells at 2,3) - see eqColumnIndexFor.
+    const termCols: [number, number] = instance.eqColumnIndex === 2 ? [0, 1] : [2, 3];
+    distributeAnnotation = { ...distributeContent, arcsShown, termCols };
+  }
 
   function handleChoice(i: number) {
     if (revealed) return;
@@ -483,7 +692,11 @@ export default function StepSolver({
         >
           {skillName}
         </div>
-        <EquationGrid rows={visibleRows} eqColumnIndex={instance.eqColumnIndex} />
+        <EquationGrid
+          rows={visibleRows}
+          eqColumnIndex={instance.eqColumnIndex}
+          distributeAnnotation={distributeAnnotation}
+        />
         {revealed && currentStep && (
           <div
             style={{
