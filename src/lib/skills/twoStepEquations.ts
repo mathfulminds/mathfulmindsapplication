@@ -100,19 +100,39 @@ export function buildSolverInstance(
     const setupExpr2 = bIsSecond ? BLANK : divSetup;
     stepBRow = { cells: assembleRow(setupExpr1, setupExpr2, divRhs, orientation) };
     stepBPrompt = `What undoes multiplying ${variableSymbol} by ${a}?`;
-    stepBChoices = [
-      { text: `Dividing both sides by ${a}`, isCorrect: true, misconceptionTag: null },
-      {
-        text: `Multiplying both sides by ${a}`,
-        isCorrect: false,
-        misconceptionTag: "confuses_additive_and_multiplicative_inverse",
-      },
-      {
-        text: `Dividing both sides by ${Math.abs(b)}`,
-        isCorrect: false,
-        misconceptionTag: "targets_wrong_term_first",
-      },
-    ];
+    // "Dividing both sides by |b|" collides with the correct choice when
+    // |b| happens to equal a - a legitimate input this function must
+    // handle (e.g. when called with externally-supplied coefficients, not
+    // just its own generator's) even though its own generator never
+    // produces that combination.
+    stepBChoices =
+      Math.abs(b) !== a
+        ? [
+            { text: `Dividing both sides by ${a}`, isCorrect: true, misconceptionTag: null },
+            {
+              text: `Multiplying both sides by ${a}`,
+              isCorrect: false,
+              misconceptionTag: "confuses_additive_and_multiplicative_inverse",
+            },
+            {
+              text: `Dividing both sides by ${Math.abs(b)}`,
+              isCorrect: false,
+              misconceptionTag: "targets_wrong_term_first",
+            },
+          ]
+        : [
+            { text: `Dividing both sides by ${a}`, isCorrect: true, misconceptionTag: null },
+            {
+              text: `Multiplying both sides by ${a}`,
+              isCorrect: false,
+              misconceptionTag: "confuses_additive_and_multiplicative_inverse",
+            },
+            {
+              text: `Adding ${a} to both sides`,
+              isCorrect: false,
+              misconceptionTag: "confuses_additive_and_multiplicative_inverse",
+            },
+          ];
     stepBExplanation = `Undo multiplication by dividing both sides by ${a}.`;
   } else {
     const exprIsLeftOfEquals = orientation === "expressionLeft";
@@ -128,19 +148,34 @@ export function buildSolverInstance(
     const setupExpr2 = bIsSecond ? BLANK : multipliedVarTerm;
     stepBRow = { cells: assembleRow(setupExpr1, setupExpr2, multipliedConstant, orientation) };
     stepBPrompt = `What undoes dividing ${variableSymbol} by ${a}?`;
-    stepBChoices = [
-      { text: `Multiplying both sides by ${a}`, isCorrect: true, misconceptionTag: null },
-      {
-        text: `Dividing both sides by ${a}`,
-        isCorrect: false,
-        misconceptionTag: "confuses_additive_and_multiplicative_inverse",
-      },
-      {
-        text: `Multiplying both sides by ${Math.abs(b)}`,
-        isCorrect: false,
-        misconceptionTag: "targets_wrong_term_first",
-      },
-    ];
+    stepBChoices =
+      Math.abs(b) !== a
+        ? [
+            { text: `Multiplying both sides by ${a}`, isCorrect: true, misconceptionTag: null },
+            {
+              text: `Dividing both sides by ${a}`,
+              isCorrect: false,
+              misconceptionTag: "confuses_additive_and_multiplicative_inverse",
+            },
+            {
+              text: `Multiplying both sides by ${Math.abs(b)}`,
+              isCorrect: false,
+              misconceptionTag: "targets_wrong_term_first",
+            },
+          ]
+        : [
+            { text: `Multiplying both sides by ${a}`, isCorrect: true, misconceptionTag: null },
+            {
+              text: `Dividing both sides by ${a}`,
+              isCorrect: false,
+              misconceptionTag: "confuses_additive_and_multiplicative_inverse",
+            },
+            {
+              text: `Adding ${a} to both sides`,
+              isCorrect: false,
+              misconceptionTag: "confuses_additive_and_multiplicative_inverse",
+            },
+          ];
     stepBExplanation = `Undo division by multiplying both sides by ${a}.`;
   }
 
@@ -198,18 +233,25 @@ export function buildSolverInstance(
   const opSymbol = form === "multiply" ? "\u00f7" : "\u00d7";
   const computed = form === "multiply" ? newRhs / a : newRhs * a;
   const sameSign = (newRhs >= 0) === (a >= 0);
+  const correctText = `${variableSymbol} = ${solution}`;
+  const stepCCandidates: { text: string; tag: string }[] = [
+    { text: `${variableSymbol} = ${-solution}`, tag: "sign_error" },
+    { text: `${variableSymbol} = ${newRhs}`, tag: "forgot_final_operation" },
+    { text: `${variableSymbol} = ${solution + 1}`, tag: "arithmetic_slip" },
+    { text: `${variableSymbol} = ${solution - 1}`, tag: "arithmetic_slip" },
+  ];
+  const seenStepC = new Set([correctText]);
+  const stepCDistractors: { text: string; tag: string }[] = [];
+  for (const c of stepCCandidates) {
+    if (stepCDistractors.length === 2) break;
+    if (seenStepC.has(c.text)) continue;
+    seenStepC.add(c.text);
+    stepCDistractors.push(c);
+  }
   const stepCChoices: Choice[] = [
-    { text: `${variableSymbol} = ${solution}`, isCorrect: true, misconceptionTag: null },
-    {
-      text: `${variableSymbol} = ${-solution}`,
-      isCorrect: false,
-      misconceptionTag: "sign_error",
-    },
-    {
-      text: `${variableSymbol} = ${newRhs}`,
-      isCorrect: false,
-      misconceptionTag: "forgot_final_operation",
-    },
+    { text: correctText, isCorrect: true, misconceptionTag: null },
+    { text: stepCDistractors[0].text, isCorrect: false, misconceptionTag: stepCDistractors[0].tag },
+    { text: stepCDistractors[1].text, isCorrect: false, misconceptionTag: stepCDistractors[1].tag },
   ];
 
   const stepC: SolverStep = {

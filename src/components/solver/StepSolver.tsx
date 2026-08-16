@@ -4,7 +4,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { InlineMath } from "react-katex";
 import "katex/dist/katex.min.css";
-import type { GridRow, SolverInstance } from "@/lib/skills/types";
+import type { DistributeVisual, GridRow, PairedGridRow, SolverInstance, SolverStep } from "@/lib/skills/types";
+
+function isPairedRow(row: GridRow | PairedGridRow): row is PairedGridRow {
+  return "eq1" in row;
+}
 
 const PLAINTEXT_PREFIX = "PLAINTEXT:";
 const GRAPH_PREFIX = "GRAPH:";
@@ -265,13 +269,13 @@ function renderStackedFraction(content: string, color: string): ReactNode {
   );
 }
 
-function Cell({ math, color }: { math: string; color: string }) {
+function Cell({ math, color, align = "center" }: { math: string; color: string; align?: "center" | "right" }) {
   const isPlainText = math.startsWith(PLAINTEXT_PREFIX);
   const isStackedFraction = math.startsWith(STACKEDFRACTION_PREFIX);
   return (
     <div
       style={{
-        textAlign: "center",
+        textAlign: align,
         color,
         overflow: "visible",
         lineHeight: 1.8,
@@ -425,7 +429,7 @@ function DistributeDiagram({
         <span ref={term1Ref}>
           <InlineMath math={term1} />
         </span>
-        <span ref={term2Ref}>
+        <span ref={term2Ref} style={{ marginLeft: 4 }}>
           <InlineMath math={term2} />
         </span>
         <InlineMath math=")" />
@@ -438,8 +442,11 @@ function EquationGrid({
   rows,
   eqColumnIndex,
   distributeAnnotation,
+  eq1Annotation,
+  eq2Annotation,
+  termAlign,
 }: {
-  rows: GridRow[];
+  rows: (GridRow | PairedGridRow)[];
   eqColumnIndex: number;
   distributeAnnotation?: {
     coefficient: string;
@@ -448,6 +455,9 @@ function EquationGrid({
     arcsShown: 0 | 1 | 2;
     termCols: [number, number];
   };
+  eq1Annotation?: { coefficient: string; term1: string; term2: string; arcsShown: 0 | 1 | 2; termCols: [number, number] };
+  eq2Annotation?: { coefficient: string; term1: string; term2: string; arcsShown: 0 | 1 | 2; termCols: [number, number] };
+  termAlign?: "right";
 }) {
   return (
     <div style={{ overflowX: "auto", width: "100%", paddingTop: 14, paddingBottom: 4 }}>
@@ -463,27 +473,74 @@ function EquationGrid({
         }}
       >
           {rows.flatMap((row, rowIndex) => {
-            const color = row.highlight === "success" ? "var(--green)" : "var(--ink)";
+            function colorFor(highlight: "success" | "phase-blue" | "phase-green" | undefined): string {
+              if (highlight === "success" || highlight === "phase-green") return "var(--green)";
+              if (highlight === "phase-blue") return "var(--blue)";
+              return "var(--ink)";
+            }
 
-            // Row 0 (the original, never-updated expression) gets its two
-            // term columns merged into one spanning cell containing the
-            // arrow diagram, when this problem has one - this is what
-            // makes the arrows sit directly on the actual first line of
-            // the equation instead of floating as a separate duplicate
-            // above the grid. Every other row (including this same slot
-            // pair on later rows, once distribution is complete) renders
-            // normally.
-            if (rowIndex === 0 && distributeAnnotation) {
-              const [startCol] = [...distributeAnnotation.termCols].sort((a, b) => a - b);
-              return row.cells.map((cellValue, colIndex) => {
+            // Renders one equation's 4 cells (used directly for a normal
+            // single-equation row, and twice - once per equation - for a
+            // paired row). Cells stay in the SAME repeat(4,auto) grid
+            // track structure either way, which is what keeps a paired
+            // row's columns aligned with every single-equation row above
+            // or below it (e.g. the combined equation elimination
+            // produces later). `marginBottom` tightens the gap between
+            // the two equations of a pair specifically, without touching
+            // the grid's own rowGap (which stays uniform for every other
+            // row boundary).
+            function renderCells(cells: readonly [string, string, string, string], rowKey: string, color: string, marginBottom?: number) {
+              return cells.map((cellValue, colIndex) => {
+                const style = marginBottom !== undefined ? { marginBottom } : undefined;
+                if (colIndex === eqColumnIndex) {
+                  return (
+                    <div
+                      key={`${rowKey}-${colIndex}`}
+                      style={{
+                        textAlign: "center",
+                        color: "var(--ink-soft)",
+                        fontSize: 18,
+                        whiteSpace: "nowrap",
+                        ...style,
+                      }}
+                    >
+                      {cellValue.length > 0 ? <InlineMath math={cellValue} /> : null}
+                    </div>
+                  );
+                }
+                return (
+                  <div key={`${rowKey}-${colIndex}`} style={style}>
+                    <Cell math={cellValue} color={color} align={termAlign} />
+                  </div>
+                );
+              });
+            }
+
+            // Same idea as the parentheses skill's row-0 spanning arrow
+            // cell, generalized to work for either a plain row's cells or
+            // one equation's cells within a paired row: when an
+            // annotation is present, the two term columns merge into one
+            // spanning cell containing the arrow diagram instead of
+            // rendering normally.
+            function renderCellsOrArrow(
+              cells: readonly [string, string, string, string],
+              rowKey: string,
+              color: string,
+              annotation: { coefficient: string; term1: string; term2: string; arcsShown: 0 | 1 | 2; termCols: [number, number] } | undefined,
+              marginBottom?: number
+            ) {
+              if (!annotation) return renderCells(cells, rowKey, color, marginBottom);
+              const [startCol] = [...annotation.termCols].sort((a, b) => a - b);
+              return cells.map((cellValue, colIndex) => {
+                const style = marginBottom !== undefined ? { marginBottom } : undefined;
                 if (colIndex === startCol) {
                   return (
-                    <div key={`${rowIndex}-${colIndex}`} style={{ gridColumn: `${startCol + 1} / span 2` }}>
+                    <div key={`${rowKey}-${colIndex}`} style={{ gridColumn: `${startCol + 1} / span 2`, ...style }}>
                       <DistributeDiagram
-                        coefficient={distributeAnnotation.coefficient}
-                        term1={distributeAnnotation.term1}
-                        term2={distributeAnnotation.term2}
-                        arcsShown={distributeAnnotation.arcsShown}
+                        coefficient={annotation.coefficient}
+                        term1={annotation.term1}
+                        term2={annotation.term2}
+                        arcsShown={annotation.arcsShown}
                       />
                     </div>
                   );
@@ -495,8 +552,9 @@ function EquationGrid({
                 // being centered against the row's full height - which
                 // includes the arc space above that text - and landing
                 // too high.
+                const paddedStyle = { paddingTop: 34, ...style };
                 return colIndex === eqColumnIndex ? (
-                  <div key={`${rowIndex}-${colIndex}`} style={{ paddingTop: 34 }}>
+                  <div key={`${rowKey}-${colIndex}`} style={paddedStyle}>
                     <div
                       style={{ textAlign: "center", color: "var(--ink-soft)", fontSize: 18, whiteSpace: "nowrap" }}
                     >
@@ -504,30 +562,34 @@ function EquationGrid({
                     </div>
                   </div>
                 ) : (
-                  <div key={`${rowIndex}-${colIndex}`} style={{ paddingTop: 34 }}>
-                    <Cell math={cellValue} color={color} />
+                  <div key={`${rowKey}-${colIndex}`} style={paddedStyle}>
+                    <Cell math={cellValue} color={color} align={termAlign} />
                   </div>
                 );
               });
             }
 
-            return row.cells.map((cellValue, colIndex) =>
-              colIndex === eqColumnIndex ? (
-                <div
-                  key={`${rowIndex}-${colIndex}`}
-                  style={{
-                    textAlign: "center",
-                    color: "var(--ink-soft)",
-                    fontSize: 18,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {cellValue.length > 0 ? <InlineMath math={cellValue} /> : null}
-                </div>
-              ) : (
-                <Cell key={`${rowIndex}-${colIndex}`} math={cellValue} color={color} />
-              )
-            );
+            if (isPairedRow(row)) {
+              const eq1Ann = rowIndex === 0 ? eq1Annotation : undefined;
+              const eq2Ann = rowIndex === 0 ? eq2Annotation : undefined;
+              return [
+                ...renderCellsOrArrow(row.eq1, `${rowIndex}-eq1`, colorFor(row.eq1Highlight), eq1Ann, -8),
+                ...renderCellsOrArrow(row.eq2, `${rowIndex}-eq2`, colorFor(row.eq2Highlight), eq2Ann),
+              ];
+            }
+
+            const color = colorFor(row.highlight);
+
+            // Row 0 (the original, never-updated expression) gets its two
+            // term columns merged into one spanning cell containing the
+            // arrow diagram, when this problem has one - this is what
+            // makes the arrows sit directly on the actual first line of
+            // the equation instead of floating as a separate duplicate
+            // above the grid. Every other row (including this same slot
+            // pair on later rows, once distribution is complete) renders
+            // normally.
+            const singleAnnotation = rowIndex === 0 ? distributeAnnotation : undefined;
+            return renderCellsOrArrow(row.cells, `${rowIndex}`, color, singleAnnotation);
           })}
         </div>
       </div>
@@ -576,9 +638,9 @@ export default function StepSolver({
   const isLastStep = stepIndex === instance.steps.length - 1;
 
   const slotOrder: string[] = ["__initial__"];
-  const slotContent: Record<string, GridRow> = { __initial__: instance.initialRow };
+  const slotContent: Record<string, GridRow | PairedGridRow> = { __initial__: instance.initialRow };
 
-  function applyUpdates(updates: { slotId: string; row: GridRow }[]) {
+  function applyUpdates(updates: { slotId: string; row: GridRow | PairedGridRow }[]) {
     for (const update of updates) {
       if (!(update.slotId in slotContent)) slotOrder.push(update.slotId);
       slotContent[update.slotId] = update.row;
@@ -592,21 +654,31 @@ export default function StepSolver({
     applyUpdates(currentStep.rowUpdates);
   }
 
-  const visibleRows: GridRow[] = slotOrder.map((id) => slotContent[id]);
+  const visibleRows: (GridRow | PairedGridRow)[] = slotOrder.map((id) => slotContent[id]);
 
   // If this problem has distribute steps, figure out how many arcs
   // should be showing based on step POSITION relative to those two
   // steps, not just the current step's own reveal state - that's what
   // makes the arcs persist once the user has moved past both distribute
   // questions, instead of disappearing the moment currentStep becomes
-  // something else.
-  const distributeContent = instance.steps.find((s) => s.distributeVisual)?.distributeVisual;
-  let distributeAnnotation:
-    | { coefficient: string; term1: string; term2: string; arcsShown: 0 | 1 | 2; termCols: [number, number] }
-    | undefined;
-  if (distributeContent) {
-    const idx1 = instance.steps.findIndex((s) => s.stepId === "distribute_first_term");
-    const idx2 = instance.steps.findIndex((s) => s.stepId === "distribute_second_term");
+  // something else. Generalized to support up to two independent
+  // annotations (one per equation) for systems-of-equations-style
+  // skills, where each equation's arrows progress on its own schedule -
+  // single-equation skills (parentheses) just get one, exactly as before.
+  function computeAnnotation(
+    content: DistributeVisual,
+    steps: SolverStep[],
+    eqColIdx: number
+  ): { coefficient: string; term1: string; term2: string; arcsShown: 0 | 1 | 2; termCols: [number, number] } | undefined {
+    if (content.chooseStepId) {
+      const chooseIdx = steps.findIndex((s) => s.stepId === content.chooseStepId);
+      const chooseReached = chooseIdx !== -1 && (stepIndex > chooseIdx || (stepIndex === chooseIdx && revealed));
+      if (!chooseReached) return undefined;
+    }
+    const firstId = content.firstTermStepId ?? "distribute_first_term";
+    const secondId = content.secondTermStepId ?? "distribute_second_term";
+    const idx1 = steps.findIndex((s) => s.stepId === firstId);
+    const idx2 = steps.findIndex((s) => s.stepId === secondId);
     let arcsShown: 0 | 1 | 2 = 0;
     if (idx1 !== -1 && idx2 !== -1) {
       if (stepIndex < idx1) arcsShown = 0;
@@ -616,9 +688,17 @@ export default function StepSolver({
     }
     // eqColumnIndex is 2 for expressionLeft (term cells at 0,1) or 1 for
     // expressionRight (term cells at 2,3) - see eqColumnIndexFor.
-    const termCols: [number, number] = instance.eqColumnIndex === 2 ? [0, 1] : [2, 3];
-    distributeAnnotation = { ...distributeContent, arcsShown, termCols };
+    const termCols: [number, number] = eqColIdx === 2 ? [0, 1] : [2, 3];
+    return { coefficient: content.coefficient, term1: content.term1, term2: content.term2, arcsShown, termCols };
   }
+
+  const eq1DistributeContent = instance.steps.find((s) => s.distributeVisual?.equation === "eq1")?.distributeVisual;
+  const eq2DistributeContent = instance.steps.find((s) => s.distributeVisual?.equation === "eq2")?.distributeVisual;
+  const singleDistributeContent = instance.steps.find((s) => s.distributeVisual && !s.distributeVisual.equation)?.distributeVisual;
+
+  const eq1Annotation = eq1DistributeContent ? computeAnnotation(eq1DistributeContent, instance.steps, instance.eqColumnIndex) : undefined;
+  const eq2Annotation = eq2DistributeContent ? computeAnnotation(eq2DistributeContent, instance.steps, instance.eqColumnIndex) : undefined;
+  const distributeAnnotation = singleDistributeContent ? computeAnnotation(singleDistributeContent, instance.steps, instance.eqColumnIndex) : undefined;
 
   function handleChoice(i: number) {
     if (revealed) return;
@@ -696,6 +776,9 @@ export default function StepSolver({
           rows={visibleRows}
           eqColumnIndex={instance.eqColumnIndex}
           distributeAnnotation={distributeAnnotation}
+          eq1Annotation={eq1Annotation}
+          eq2Annotation={eq2Annotation}
+          termAlign={instance.termAlign}
         />
         {revealed && currentStep && (
           <div
@@ -726,15 +809,27 @@ export default function StepSolver({
         {currentStep && (
           <>
             <div
+              role="progressbar"
+              aria-valuenow={stepIndex + 1}
+              aria-valuemin={1}
+              aria-valuemax={instance.steps.length}
               style={{
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                color: "var(--ink-soft)",
+                width: "100%",
+                height: 6,
+                borderRadius: 999,
+                background: "var(--line)",
+                overflow: "hidden",
               }}
             >
-              Step {stepIndex + 1} of {instance.steps.length}
+              <div
+                style={{
+                  width: `${(100 * (stepIndex + (revealed ? 1 : 0.15))) / instance.steps.length}%`,
+                  height: "100%",
+                  borderRadius: 999,
+                  background: "var(--blue)",
+                  transition: "width 0.3s ease",
+                }}
+              />
             </div>
             <p style={{ margin: 0, fontSize: 16, fontWeight: 700, overflow: "visible", lineHeight: 1.8 }}>
               <MixedText content={currentStep.prompt} />

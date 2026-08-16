@@ -136,18 +136,25 @@ export function buildOneStepInstance(
     // Second step: explicitly test the arithmetic, same as the
     // multiplicative variant's "compute the value" step.
     const opSymbol = constantIsPositive ? "\u2212" : "+";
+    const additiveCorrectText = `${variableSymbol} = ${solution}`;
+    const additiveCandidates: { text: string; tag: string }[] = [
+      { text: `${variableSymbol} = ${-solution}`, tag: "sign_error" },
+      { text: `${variableSymbol} = ${rhs + b}`, tag: "flipped_the_operation" },
+      { text: `${variableSymbol} = ${solution + 1}`, tag: "arithmetic_slip" },
+      { text: `${variableSymbol} = ${solution - 1}`, tag: "arithmetic_slip" },
+    ];
+    const seenAdditive = new Set([additiveCorrectText]);
+    const additiveDistractors: { text: string; tag: string }[] = [];
+    for (const c of additiveCandidates) {
+      if (additiveDistractors.length === 2) break;
+      if (seenAdditive.has(c.text)) continue;
+      seenAdditive.add(c.text);
+      additiveDistractors.push(c);
+    }
     const stepTwoChoices: Choice[] = [
-      { text: `${variableSymbol} = ${solution}`, isCorrect: true, misconceptionTag: null },
-      {
-        text: `${variableSymbol} = ${-solution}`,
-        isCorrect: false,
-        misconceptionTag: "sign_error",
-      },
-      {
-        text: `${variableSymbol} = ${rhs + b}`,
-        isCorrect: false,
-        misconceptionTag: "flipped_the_operation",
-      },
+      { text: additiveCorrectText, isCorrect: true, misconceptionTag: null },
+      { text: additiveDistractors[0].text, isCorrect: false, misconceptionTag: additiveDistractors[0].tag },
+      { text: additiveDistractors[1].text, isCorrect: false, misconceptionTag: additiveDistractors[1].tag },
     ];
 
     const stepTwo: SolverStep = {
@@ -230,18 +237,30 @@ export function buildOneStepInstance(
   const opSymbol = form === "multiply" ? "\u00f7" : "\u00d7";
   const computed = form === "multiply" ? rhs / a : rhs * a;
   const sameSign = (rhs >= 0) === (a >= 0);
+  // rhs can equal solution or -solution when |a| === 1 (a legitimate input
+  // this function must handle even though its own generator above never
+  // produces it) - guard against that distractor colliding with the
+  // correct answer or the sign-error distractor instead of assuming it
+  // never will.
+  const correctText = `${variableSymbol} = ${solution}`;
+  const finalCandidates: { text: string; tag: string }[] = [
+    { text: `${variableSymbol} = ${-solution}`, tag: "sign_error" },
+    { text: `${variableSymbol} = ${rhs}`, tag: "forgot_final_operation" },
+    { text: `${variableSymbol} = ${solution + 1}`, tag: "arithmetic_slip" },
+    { text: `${variableSymbol} = ${solution - 1}`, tag: "arithmetic_slip" },
+  ];
+  const seenFinal = new Set([correctText]);
+  const finalDistractors: { text: string; tag: string }[] = [];
+  for (const c of finalCandidates) {
+    if (finalDistractors.length === 2) break;
+    if (seenFinal.has(c.text)) continue;
+    seenFinal.add(c.text);
+    finalDistractors.push(c);
+  }
   const finalChoices: Choice[] = [
-    { text: `${variableSymbol} = ${solution}`, isCorrect: true, misconceptionTag: null },
-    {
-      text: `${variableSymbol} = ${-solution}`,
-      isCorrect: false,
-      misconceptionTag: "sign_error",
-    },
-    {
-      text: `${variableSymbol} = ${rhs}`,
-      isCorrect: false,
-      misconceptionTag: "forgot_final_operation",
-    },
+    { text: correctText, isCorrect: true, misconceptionTag: null },
+    { text: finalDistractors[0].text, isCorrect: false, misconceptionTag: finalDistractors[0].tag },
+    { text: finalDistractors[1].text, isCorrect: false, misconceptionTag: finalDistractors[1].tag },
   ];
 
   const finalRow: GridRow = {
