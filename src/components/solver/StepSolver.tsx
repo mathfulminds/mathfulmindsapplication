@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { InlineMath } from "react-katex";
 import "katex/dist/katex.min.css";
 import type { DistributeVisual, GridRow, PairedGridRow, SolverInstance, SolverStep } from "@/lib/skills/types";
+import Celebration from "@/components/solver/Celebration";
 
 function isPairedRow(row: GridRow | PairedGridRow): row is PairedGridRow {
   return "eq1" in row;
@@ -598,9 +599,13 @@ function EquationGrid({
 export default function StepSolver({
   generate,
   skillName,
+  finalButtonLabel = "Try a new problem →",
+  celebrateOnComplete = false,
 }: {
   generate: () => SolverInstance;
   skillName: string;
+  finalButtonLabel?: string;
+  celebrateOnComplete?: boolean;
 }) {
   // Start as null - don't generate a random instance during server-side
   // render, since Math.random() would produce a DIFFERENT equation on the
@@ -617,11 +622,33 @@ export default function StepSolver({
   // instead of demanding the student re-click the correct choice again -
   // only stepping past this point requires a fresh answer.
   const [furthestStepIndex, setFurthestStepIndex] = useState(0);
+  // Balloon celebration state - opt-in via celebrateOnComplete, so this
+  // is entirely inert for every skill page that doesn't pass it. The ref
+  // (not state) tracks whether this instance has already celebrated,
+  // so revisiting the final step via Previous/Next doesn't replay it -
+  // celebration is for the MOMENT of first completing the problem, not
+  // something that fires every time that step happens to be on screen.
+  const [celebration, setCelebration] = useState<number | null>(null);
+  const celebratedRef = useRef(false);
 
   useEffect(() => {
     setInstance(generate());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Computed null-safely (instance may still be null on the very first
+  // render) so this can sit ABOVE the early-return guard below - every
+  // hook in this component must run on every render, in the same order,
+  // and an early return partway through would break that if any hook
+  // depended on something only computed after it.
+  const isLastStep = instance ? stepIndex === instance.steps.length - 1 : false;
+
+  useEffect(() => {
+    if (celebrateOnComplete && revealed && isLastStep && !celebratedRef.current) {
+      celebratedRef.current = true;
+      setCelebration(Date.now());
+    }
+  }, [celebrateOnComplete, revealed, isLastStep]);
 
   if (!instance) {
     return (
@@ -641,7 +668,6 @@ export default function StepSolver({
   }
 
   const currentStep = instance.steps[stepIndex];
-  const isLastStep = stepIndex === instance.steps.length - 1;
 
   const slotOrder: string[] = ["__initial__"];
   const slotContent: Record<string, GridRow | PairedGridRow> = { __initial__: instance.initialRow };
@@ -749,6 +775,8 @@ export default function StepSolver({
     setSelected(null);
     setRevealed(false);
     setFurthestStepIndex(0);
+    celebratedRef.current = false;
+    setCelebration(null);
   }
 
   return (
@@ -769,6 +797,7 @@ export default function StepSolver({
           border-bottom-color: currentColor !important;
         }
       `}</style>
+      {celebration !== null && <Celebration celebrationKey={celebration} onDone={() => setCelebration(null)} />}
       <div
         style={{
           display: "grid",
@@ -959,7 +988,7 @@ export default function StepSolver({
                     cursor: "pointer",
                   }}
                 >
-                  Try a new problem →
+                  {finalButtonLabel}
                 </button>
               )}
             </div>
