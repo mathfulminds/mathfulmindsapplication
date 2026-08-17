@@ -611,6 +611,12 @@ export default function StepSolver({
   const [stepIndex, setStepIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [revealed, setRevealed] = useState(false);
+  // Tracks the furthest step actually answered, separately from stepIndex
+  // (which step is currently being VIEWED). This is what lets "Next"
+  // after going "Previous" just resume showing already-answered steps
+  // instead of demanding the student re-click the correct choice again -
+  // only stepping past this point requires a fresh answer.
+  const [furthestStepIndex, setFurthestStepIndex] = useState(0);
 
   useEffect(() => {
     setInstance(generate());
@@ -705,13 +711,36 @@ export default function StepSolver({
     setSelected(i);
     if (currentStep.choices[i].isCorrect) {
       setRevealed(true);
+      setFurthestStepIndex((prev) => Math.max(prev, stepIndex));
     }
   }
 
+  // Shared by both Previous and "Next into already-answered territory":
+  // jumps to a step and, if it's already been answered before, shows it
+  // immediately in its answered state (correct choice highlighted)
+  // rather than making the student re-click it.
+  function goToStep(newIndex: number, alreadyAnswered: boolean) {
+    setStepIndex(newIndex);
+    if (alreadyAnswered) {
+      setSelected(instance!.steps[newIndex].choices.findIndex((c) => c.isCorrect));
+      setRevealed(true);
+    } else {
+      setSelected(null);
+      setRevealed(false);
+    }
+  }
+
+  function handlePrevious() {
+    if (stepIndex === 0) return;
+    // Any step behind the current position has necessarily already been
+    // answered (steps only advance on a correct answer), so this is
+    // always pure review.
+    goToStep(stepIndex - 1, true);
+  }
+
   function handleNext() {
-    setStepIndex(stepIndex + 1);
-    setSelected(null);
-    setRevealed(false);
+    const nextIndex = stepIndex + 1;
+    goToStep(nextIndex, nextIndex <= furthestStepIndex);
   }
 
   function handleNewProblem() {
@@ -719,6 +748,7 @@ export default function StepSolver({
     setStepIndex(0);
     setSelected(null);
     setRevealed(false);
+    setFurthestStepIndex(0);
   }
 
   return (
@@ -877,44 +907,62 @@ export default function StepSolver({
                 );
               })}
             </div>
-            {revealed && !isLastStep && (
-              <button
-                onClick={handleNext}
-                style={{
-                  marginTop: 10,
-                  alignSelf: "flex-start",
-                  background: "var(--blue)",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 999,
-                  padding: "9px 20px",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                }}
-              >
-                Next step →
-              </button>
-            )}
-            {revealed && isLastStep && (
-              <button
-                onClick={handleNewProblem}
-                style={{
-                  marginTop: 10,
-                  alignSelf: "flex-start",
-                  background: "var(--blue)",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 999,
-                  padding: "9px 20px",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                }}
-              >
-                Try a new problem →
-              </button>
-            )}
+            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              {stepIndex > 0 && (
+                <button
+                  onClick={handlePrevious}
+                  style={{
+                    alignSelf: "flex-start",
+                    background: "var(--paper)",
+                    color: "var(--ink)",
+                    border: "1.5px solid var(--line)",
+                    borderRadius: 999,
+                    padding: "9px 20px",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  ← Previous step
+                </button>
+              )}
+              {revealed && !isLastStep && (
+                <button
+                  onClick={handleNext}
+                  style={{
+                    alignSelf: "flex-start",
+                    background: "var(--blue)",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 999,
+                    padding: "9px 20px",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Next step →
+                </button>
+              )}
+              {revealed && isLastStep && (
+                <button
+                  onClick={handleNewProblem}
+                  style={{
+                    alignSelf: "flex-start",
+                    background: "var(--blue)",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 999,
+                    padding: "9px 20px",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Try a new problem →
+                </button>
+              )}
+            </div>
           </>
         )}
       </div>
