@@ -600,7 +600,7 @@ export default function StepSolver({
   generate,
   skillName,
   finalButtonLabel = "Try a new problem →",
-  celebrateOnComplete = false,
+  celebrateOnComplete = true,
 }: {
   generate: () => SolverInstance;
   skillName: string;
