@@ -196,7 +196,7 @@ export function buildSolverInstance(
       misconceptionTag: null,
     },
     {
-      text: `${constantIsPositive ? "Divide" : "Multiply"} both sides by ${Math.abs(b)}`,
+      text: `${constantIsPositive ? "Dividing" : "Multiplying"} both sides by ${Math.abs(b)}`,
       isCorrect: false,
       misconceptionTag: "confuses_additive_and_multiplicative_inverse",
     },

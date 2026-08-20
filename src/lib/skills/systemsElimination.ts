@@ -322,7 +322,7 @@ export function buildEliminationSolverInstance(inst: EliminationInstance): Solve
       choices: multiplierChoices(m, mAlt),
       explanationOnCorrect:
         m === 1
-          ? `Equation ${eqNum} already has a matching ${eliminateVar} coefficient - no scaling needed, but multiplying both sides by 1 keeps the equation balanced.`
+          ? `The Equation ${eqNum} already has a matching ${eliminateVar} coefficient, so no scaling is needed, but multiplying both sides by 1 keeps the equation balanced.`
           : `Multiplying both sides of Equation ${eqNum} by ${m} will make its ${eliminateVar} coefficient match the other equation's.`,
       distributeVisual: {
         coefficient: `(\\textcolor{${BLUE_HEX}}{${m}})`,
@@ -702,7 +702,7 @@ export function buildEliminationSolverInstance(inst: EliminationInstance): Solve
         misconceptionTag: substituteIntoEq === 2 ? null : "chose_harder_equation_to_substitute_into",
       },
     ]),
-    explanationOnCorrect: `Equation ${substituteIntoEq} has the simpler coefficient to work with.`,
+    explanationOnCorrect: `The Equation ${substituteIntoEq} has the simpler coefficient to work with.`,
   };
 
   const substituteStep: SolverStep = {

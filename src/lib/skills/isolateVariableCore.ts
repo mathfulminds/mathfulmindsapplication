@@ -80,6 +80,21 @@ export function assembleRow(
   return [constantCell, eqSymbol, exprCell1, exprCell2];
 }
 
+// Same idea as assembleRow, for rows that need 3 separate term columns
+// instead of 2 (e.g. a kept term, a distributed constant, and a
+// distributed variable term, all shown as 3 independent columns rather
+// than combining any two of them into one column's text). expressionLeft
+// only, since that's the only orientation any current 3-term row needs.
+export function assembleRow3(
+  exprCell1: string,
+  exprCell2: string,
+  exprCell3: string,
+  constantCell: string,
+  eqSymbol: string = "="
+): [string, string, string, string, string] {
+  return [exprCell1, exprCell2, exprCell3, eqSymbol, constantCell];
+}
+
 export function eqColumnIndexFor(orientation: Orientation): 1 | 2 {
   return orientation === "expressionLeft" ? 2 : 1;
 }

@@ -331,16 +331,127 @@ function MixedText({ content }: { content: string }) {
 // there's no second, distinct cell to measure "just the coefficient" vs
 // "just term1" apart from each other. Predictable monospace character
 // widths are the only way to get that sub-cell precision.
+// Connects the bottom of one row to the top of another, entirely
+// different row - e.g. "this substituted value came from that isolated
+// expression above." Unlike DistributeDiagram's arcs (which connect
+// cells WITHIN one row via refs), there's no single element to ref here
+// ahead of time - a row is just a run of sibling grid cells with no
+// wrapping element, and WHICH physical row is at a given slot changes
+// as steps reveal. Found instead via data-row-slot attributes scoped to
+// the grid container, measured after paint.
+// Measures the widest rendered width among a list of KaTeX strings,
+// off-screen, and reports it once via onMeasured. Used to lock a grid
+// column's width in from the start (based on everything it will EVER
+// need to hold, not just what's revealed so far) - the actual fix for
+// "the first line keeps sliding sideways as later lines appear," since
+// that happens specifically because an auto-sized grid column grows to
+// fit its current content and drags everything already in that column
+// along with it.
+function ColumnWidthMeasurer({ mathStrings, onMeasured }: { mathStrings: string[]; onMeasured: (px: number) => void }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!containerRef.current) {
+      onMeasured(0);
+      return;
+    }
+    let max = 0;
+    for (const child of Array.from(containerRef.current.children)) {
+      max = Math.max(max, child.getBoundingClientRect().width);
+    }
+    onMeasured(max);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mathStrings.join("|")]);
+
+  return (
+    <div ref={containerRef} style={{ position: "fixed", top: -9999, left: -9999, visibility: "hidden", pointerEvents: "none" }}>
+      {mathStrings.map((s, i) => (
+        <div key={i} style={{ whiteSpace: "nowrap", fontSize: 21, display: "inline-block" }}>
+          <InlineMath math={s} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RowConnector({
+  containerRef,
+  fromSlotId,
+  toSlotId,
+}: {
+  containerRef: { current: HTMLDivElement | null };
+  fromSlotId: string;
+  toSlotId: string;
+}) {
+  const [path, setPath] = useState<string | null>(null);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const fromEls = Array.from(container.querySelectorAll<HTMLElement>(`[data-row-slot="${fromSlotId}"]`));
+    const toEls = Array.from(container.querySelectorAll<HTMLElement>(`[data-row-slot="${toSlotId}"]`));
+    if (fromEls.length === 0 || toEls.length === 0) {
+      setPath(null);
+      return;
+    }
+    // Anchored to each row's overall horizontal center (union of all its
+    // cells), not just its first cell - the isolated variable can sit in
+    // either column depending on which variable it is, so the first cell
+    // is sometimes blank, which would anchor the arrow to empty space.
+    function unionBox(els: HTMLElement[]) {
+      const rects = els.map((e) => e.getBoundingClientRect());
+      const left = Math.min(...rects.map((r) => r.left));
+      const right = Math.max(...rects.map((r) => r.right));
+      const top = Math.min(...rects.map((r) => r.top));
+      const bottom = Math.max(...rects.map((r) => r.bottom));
+      return { top, bottom, centerX: (left + right) / 2 };
+    }
+    const containerRect = container.getBoundingClientRect();
+    const from = unionBox(fromEls);
+    const to = unionBox(toEls);
+    const startX = from.centerX - containerRect.left;
+    const startY = from.bottom - containerRect.top;
+    const endX = to.centerX - containerRect.left;
+    const endY = to.top - containerRect.top;
+    const midY = (startY + endY) / 2;
+    setPath(`M ${startX} ${startY} C ${startX} ${midY}, ${endX} ${midY}, ${endX} ${endY - 6}`);
+  }, [containerRef, fromSlotId, toSlotId]);
+
+  if (!path) return null;
+  return (
+    <svg
+      style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}
+    >
+      <defs>
+        <marker id="rowConnectorArrow" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill="var(--ink-soft)" />
+        </marker>
+      </defs>
+      <path d={path} stroke="var(--ink-soft)" strokeWidth="1.3" fill="none" markerEnd="url(#rowConnectorArrow)" />
+    </svg>
+  );
+}
+
 function DistributeDiagram({
   coefficient,
   term1,
   term2,
   arcsShown,
+  prefix,
+  prefixColor,
+  suffix,
+  suffixColor,
+  parenColor,
 }: {
   coefficient: string;
   term1: string;
   term2: string;
   arcsShown: 0 | 1 | 2;
+  prefix?: string;
+  prefixColor?: string;
+  suffix?: string;
+  suffixColor?: string;
+  parenColor?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const coefRef = useRef<HTMLSpanElement | null>(null);
@@ -423,177 +534,365 @@ function DistributeDiagram({
         </svg>
       )}
       <div style={{ display: "flex", alignItems: "baseline", fontSize: 21 }}>
+        {prefix && (
+          <span style={{ marginRight: 4, color: prefixColor }}>
+            <InlineMath math={prefix} />
+          </span>
+        )}
         <span ref={coefRef}>
           <InlineMath math={coefficient} />
         </span>
-        <InlineMath math="(" />
+        <span style={{ color: parenColor }}>
+          <InlineMath math="(" />
+        </span>
         <span ref={term1Ref}>
           <InlineMath math={term1} />
         </span>
         <span ref={term2Ref} style={{ marginLeft: 4 }}>
           <InlineMath math={term2} />
         </span>
-        <InlineMath math=")" />
+        <span style={{ color: parenColor }}>
+          <InlineMath math=")" />
+        </span>
+        {suffix && (
+          <span style={{ marginLeft: 4, color: suffixColor }}>
+            <InlineMath math={suffix} />
+          </span>
+        )}
       </div>
     </div>
   );
 }
 
+type ComputedAnnotation = {
+  coefficient: string;
+  term1: string;
+  term2: string;
+  arcsShown: 0 | 1 | 2;
+  termCols: [number, number];
+  targetSlotId: string;
+  prefix?: string;
+  prefixColor?: string;
+  suffix?: string;
+  suffixColor?: string;
+};
+
 function EquationGrid({
   rows,
+  slotIds,
+  fullRows,
+  fullSlotIds,
+  boldSlotId,
   eqColumnIndex,
   distributeAnnotation,
   eq1Annotation,
   eq2Annotation,
   termAlign,
+  rowConnectors,
+  pairedLayout,
+  trackLayout,
 }: {
   rows: (GridRow | PairedGridRow)[];
+  slotIds: string[];
+  fullRows?: (GridRow | PairedGridRow)[];
+  fullSlotIds?: string[];
+  boldSlotId?: string | null;
   eqColumnIndex: number;
-  distributeAnnotation?: {
-    coefficient: string;
-    term1: string;
-    term2: string;
-    arcsShown: 0 | 1 | 2;
-    termCols: [number, number];
-  };
-  eq1Annotation?: { coefficient: string; term1: string; term2: string; arcsShown: 0 | 1 | 2; termCols: [number, number] };
-  eq2Annotation?: { coefficient: string; term1: string; term2: string; arcsShown: 0 | 1 | 2; termCols: [number, number] };
+  distributeAnnotation?: ComputedAnnotation;
+  eq1Annotation?: ComputedAnnotation;
+  eq2Annotation?: ComputedAnnotation;
   termAlign?: "right";
+  rowConnectors?: { fromSlotId: string; toSlotId: string }[];
+  pairedLayout?: "sideBySide";
+  trackLayout?: { leftSlotIds: string[]; rightSlotIds: string[] };
 }) {
+  const outerRef = useRef<HTMLDivElement | null>(null);
+
+  function colorFor(highlight: "success" | "phase-blue" | "phase-green" | "phase-red" | undefined): string {
+    if (highlight === "success" || highlight === "phase-green") return "var(--green)";
+    if (highlight === "phase-blue") return "var(--blue)";
+    if (highlight === "phase-red") return "var(--coral)";
+    return "var(--ink)";
+  }
+
+  // Renders one flow of rows (the whole problem normally, or ONE track's
+  // slice of it in two-track mode) into the flat cell array a CSS grid
+  // needs. Pulled out so it can be called once for the normal case or
+  // twice - once per independent track - without duplicating this much
+  // logic, since each track needs its own genuinely separate grid
+  // (its own column-width calculation), not just a visual split of one
+  // shared grid.
+  function renderRowFlow(flowRows: (GridRow | PairedGridRow)[], flowSlotIds: string[]) {
+    return flowRows.flatMap((row, rowIndex) => {
+      const slotId = flowSlotIds[rowIndex];
+
+      // Renders one equation's 4 cells (used directly for a normal
+      // single-equation row, and twice - once per equation - for a
+      // paired row). Cells stay in the SAME repeat(4,auto) grid track
+      // structure either way, which is what keeps a paired row's
+      // columns aligned with every single-equation row above or below
+      // it within the SAME flow. `marginBottom` tightens the gap
+      // between the two equations of a pair specifically, without
+      // touching the grid's own rowGap (which stays uniform for every
+      // other row boundary).
+      function boldWrap(math: string): string {
+        if (!math || math.startsWith(PLAINTEXT_PREFIX) || math.startsWith(STACKEDFRACTION_PREFIX)) return math;
+        return `\\boldsymbol{${math}}`;
+      }
+
+      function renderCells(cells: readonly string[], rowKey: string, color: string, slotIdForRow: string | undefined, marginBottom?: number) {
+        const isBold = !!slotIdForRow && slotIdForRow === boldSlotId;
+        return cells.map((cellValue, colIndex) => {
+          const style = marginBottom !== undefined ? { marginBottom } : undefined;
+          const displayValue = isBold ? boldWrap(cellValue) : cellValue;
+          if (colIndex === eqColumnIndex) {
+            return (
+              <div
+                key={`${rowKey}-${colIndex}`}
+                data-row-slot={slotIdForRow}
+                style={{
+                  textAlign: "center",
+                  color: "var(--ink-soft)",
+                  fontSize: 18,
+                  whiteSpace: "nowrap",
+                  ...style,
+                }}
+              >
+                {displayValue.length > 0 ? <InlineMath math={displayValue} /> : null}
+              </div>
+            );
+          }
+          return (
+            <div key={`${rowKey}-${colIndex}`} data-row-slot={slotIdForRow} style={style}>
+              <Cell math={displayValue} color={color} align={termAlign} />
+            </div>
+          );
+        });
+      }
+
+      // Same idea as the parentheses skill's row-0 spanning arrow cell,
+      // generalized to work for either a plain row's cells or one
+      // equation's cells within a paired row: when an annotation is
+      // present, the two term columns merge into one spanning cell
+      // containing the arrow diagram instead of rendering normally.
+      function renderCellsOrArrow(
+        cells: readonly string[],
+        rowKey: string,
+        color: string,
+        annotation: ComputedAnnotation | undefined,
+        slotIdForRow: string | undefined,
+        marginBottom?: number
+      ) {
+        if (!annotation) return renderCells(cells, rowKey, color, slotIdForRow, marginBottom);
+        const [startCol] = [...annotation.termCols].sort((a, b) => a - b);
+        return cells.map((cellValue, colIndex) => {
+          const style = marginBottom !== undefined ? { marginBottom } : undefined;
+          if (colIndex === startCol) {
+            return (
+              <div key={`${rowKey}-${colIndex}`} data-row-slot={slotIdForRow} style={{ gridColumn: `${startCol + 1} / span 2`, ...style }}>
+                <DistributeDiagram
+                  coefficient={annotation.coefficient}
+                  term1={annotation.term1}
+                  term2={annotation.term2}
+                  arcsShown={annotation.arcsShown}
+                  prefix={annotation.prefix}
+                  prefixColor={annotation.prefixColor}
+                  suffix={annotation.suffix}
+                  suffixColor={annotation.suffixColor}
+                  parenColor={color}
+                />
+              </div>
+            );
+          }
+          if (colIndex === startCol + 1) return null; // absorbed into the spanning cell above
+          // Matches DistributeDiagram's own paddingTop:34 exactly, so
+          // these cells sit at the same baseline as the equation text
+          // inside the (now taller) spanning cell, instead of being
+          // centered against the row's full height - which includes the
+          // arc space above that text - and landing too high.
+          const paddedStyle = { paddingTop: 34, ...style };
+          return colIndex === eqColumnIndex ? (
+            <div key={`${rowKey}-${colIndex}`} data-row-slot={slotIdForRow} style={paddedStyle}>
+              <div style={{ textAlign: "center", color: "var(--ink-soft)", fontSize: 18, whiteSpace: "nowrap" }}>
+                {cellValue.length > 0 ? <InlineMath math={cellValue} /> : null}
+              </div>
+            </div>
+          ) : (
+            <div key={`${rowKey}-${colIndex}`} data-row-slot={slotIdForRow} style={paddedStyle}>
+              <Cell math={cellValue} color={color} align={termAlign} />
+            </div>
+          );
+        });
+      }
+
+      if (isPairedRow(row)) {
+        const eq1Ann = eq1Annotation?.targetSlotId === slotId ? eq1Annotation : undefined;
+        const eq2Ann = eq2Annotation?.targetSlotId === slotId ? eq2Annotation : undefined;
+
+        if (rowIndex === 0 && pairedLayout === "sideBySide") {
+          function miniGrid(cells: readonly string[], color: string, key: string) {
+            return (
+              <div
+                key={key}
+                data-row-slot={slotId}
+                style={{ display: "grid", gridTemplateColumns: `repeat(${cells.length}, auto)`, columnGap: 14, alignItems: "center" }}
+              >
+                {cells.map((cellValue, colIndex) =>
+                  colIndex === eqColumnIndex ? (
+                    <div key={colIndex} style={{ textAlign: "center", color: "var(--ink-soft)", fontSize: 18, whiteSpace: "nowrap" }}>
+                      {cellValue.length > 0 ? <InlineMath math={cellValue} /> : null}
+                    </div>
+                  ) : (
+                    <Cell key={colIndex} math={cellValue} color={color} align={termAlign} />
+                  )
+                )}
+              </div>
+            );
+          }
+          return [
+            <div key={`${rowIndex}-sidebyside`} style={{ gridColumn: "1 / span 4", display: "flex", gap: 48, flexWrap: "wrap" }}>
+              {miniGrid(row.eq1, colorFor(row.eq1Highlight), "eq1")}
+              {miniGrid(row.eq2, colorFor(row.eq2Highlight), "eq2")}
+            </div>,
+          ];
+        }
+
+        return [
+          ...renderCellsOrArrow(row.eq1, `${rowIndex}-eq1`, colorFor(row.eq1Highlight), eq1Ann, slotId, -8),
+          ...renderCellsOrArrow(row.eq2, `${rowIndex}-eq2`, colorFor(row.eq2Highlight), eq2Ann, slotId),
+        ];
+      }
+
+      const color = colorFor(row.highlight);
+      // The row whose slot id matches the annotation's targetSlotId gets
+      // its two term columns merged into one spanning cell containing
+      // the arrow diagram - this is what makes the arrow sit directly on
+      // the actual equation line it belongs to, wherever that row
+      // happens to be (and whichever track it's in), instead of always
+      // landing on row 0 regardless of which row it was meant for.
+      // Defaults to "__initial__" (row 0) for skills that never set
+      // targetSlotId, preserving existing behavior exactly.
+      const singleAnnotation = distributeAnnotation?.targetSlotId === slotId ? distributeAnnotation : undefined;
+      return renderCellsOrArrow(row.cells, `${rowIndex}`, color, singleAnnotation, slotId);
+    });
+  }
+
+  const connectorsToRender = (rowConnectors ?? []).filter((rc) => slotIds.includes(rc.fromSlotId) && slotIds.includes(rc.toSlotId));
+
+  if (trackLayout) {
+    const leftSet = new Set(trackLayout.leftSlotIds);
+    const rightSet = new Set(trackLayout.rightSlotIds);
+
+    function splitByTrack(rowsIn: (GridRow | PairedGridRow)[], idsIn: string[]) {
+      const left: (GridRow | PairedGridRow)[] = [];
+      const leftI: string[] = [];
+      const right: (GridRow | PairedGridRow)[] = [];
+      const rightI: string[] = [];
+      const rest: (GridRow | PairedGridRow)[] = [];
+      const restI: string[] = [];
+      rowsIn.forEach((row, i) => {
+        const id = idsIn[i];
+        if (isPairedRow(row)) {
+          left.push({ cells: row.eq1, highlight: row.eq1Highlight });
+          leftI.push(id);
+          right.push({ cells: row.eq2, highlight: row.eq2Highlight });
+          rightI.push(id);
+        } else if (leftSet.has(id)) {
+          left.push(row);
+          leftI.push(id);
+        } else if (rightSet.has(id)) {
+          right.push(row);
+          rightI.push(id);
+        } else {
+          rest.push(row);
+          restI.push(id);
+        }
+      });
+      return { left, leftI, right, rightI, rest, restI };
+    }
+
+    const { left: leftRows, leftI: leftIds, right: rightRows, rightI: rightIds, rest: unassignedRows, restI: unassignedIds } = splitByTrack(
+      rows,
+      slotIds
+    );
+
+    // The SAME split, applied to every row this problem will EVER show
+    // (fullRows/fullSlotIds), not just what's revealed so far - this is
+    return (
+      <div style={{ overflowX: "auto", width: "100%", paddingTop: 14, paddingBottom: 4 }}>
+        <div ref={outerRef} style={{ position: "relative" }}>
+          {connectorsToRender.map((rc, i) => (
+            <RowConnector key={i} containerRef={outerRef} fromSlotId={rc.fromSlotId} toSlotId={rc.toSlotId} />
+          ))}
+          <div style={{ display: "flex", gap: 48, flexWrap: "nowrap", alignItems: "flex-start" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: `repeat(${eqColumnIndex + 2}, auto)`,
+                columnGap: 14,
+                rowGap: 20,
+                alignItems: "center",
+                fontSize: 21,
+                flexShrink: 0,
+              }}
+            >
+              {renderRowFlow(leftRows, leftIds)}
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: `repeat(${eqColumnIndex + 2}, auto)`,
+                columnGap: 14,
+                rowGap: 20,
+                alignItems: "center",
+                fontSize: 21,
+                flexShrink: 0,
+              }}
+            >
+              {renderRowFlow(rightRows, rightIds)}
+            </div>
+          </div>
+          {unassignedRows.length > 0 && (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: `repeat(${eqColumnIndex + 2}, auto)`,
+                columnGap: 14,
+                rowGap: 20,
+                alignItems: "center",
+                fontSize: 21,
+                marginTop: 20,
+              }}
+            >
+              {renderRowFlow(unassignedRows, unassignedIds)}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ overflowX: "auto", width: "100%", paddingTop: 14, paddingBottom: 4 }}>
       <div
+        ref={outerRef}
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, auto)",
+          gridTemplateColumns: `repeat(${eqColumnIndex + 2}, auto)`,
           width: "fit-content",
           columnGap: 14,
           rowGap: 20,
           alignItems: "center",
           fontSize: 21,
+          position: "relative",
         }}
       >
-          {rows.flatMap((row, rowIndex) => {
-            function colorFor(highlight: "success" | "phase-blue" | "phase-green" | undefined): string {
-              if (highlight === "success" || highlight === "phase-green") return "var(--green)";
-              if (highlight === "phase-blue") return "var(--blue)";
-              return "var(--ink)";
-            }
-
-            // Renders one equation's 4 cells (used directly for a normal
-            // single-equation row, and twice - once per equation - for a
-            // paired row). Cells stay in the SAME repeat(4,auto) grid
-            // track structure either way, which is what keeps a paired
-            // row's columns aligned with every single-equation row above
-            // or below it (e.g. the combined equation elimination
-            // produces later). `marginBottom` tightens the gap between
-            // the two equations of a pair specifically, without touching
-            // the grid's own rowGap (which stays uniform for every other
-            // row boundary).
-            function renderCells(cells: readonly [string, string, string, string], rowKey: string, color: string, marginBottom?: number) {
-              return cells.map((cellValue, colIndex) => {
-                const style = marginBottom !== undefined ? { marginBottom } : undefined;
-                if (colIndex === eqColumnIndex) {
-                  return (
-                    <div
-                      key={`${rowKey}-${colIndex}`}
-                      style={{
-                        textAlign: "center",
-                        color: "var(--ink-soft)",
-                        fontSize: 18,
-                        whiteSpace: "nowrap",
-                        ...style,
-                      }}
-                    >
-                      {cellValue.length > 0 ? <InlineMath math={cellValue} /> : null}
-                    </div>
-                  );
-                }
-                return (
-                  <div key={`${rowKey}-${colIndex}`} style={style}>
-                    <Cell math={cellValue} color={color} align={termAlign} />
-                  </div>
-                );
-              });
-            }
-
-            // Same idea as the parentheses skill's row-0 spanning arrow
-            // cell, generalized to work for either a plain row's cells or
-            // one equation's cells within a paired row: when an
-            // annotation is present, the two term columns merge into one
-            // spanning cell containing the arrow diagram instead of
-            // rendering normally.
-            function renderCellsOrArrow(
-              cells: readonly [string, string, string, string],
-              rowKey: string,
-              color: string,
-              annotation: { coefficient: string; term1: string; term2: string; arcsShown: 0 | 1 | 2; termCols: [number, number] } | undefined,
-              marginBottom?: number
-            ) {
-              if (!annotation) return renderCells(cells, rowKey, color, marginBottom);
-              const [startCol] = [...annotation.termCols].sort((a, b) => a - b);
-              return cells.map((cellValue, colIndex) => {
-                const style = marginBottom !== undefined ? { marginBottom } : undefined;
-                if (colIndex === startCol) {
-                  return (
-                    <div key={`${rowKey}-${colIndex}`} style={{ gridColumn: `${startCol + 1} / span 2`, ...style }}>
-                      <DistributeDiagram
-                        coefficient={annotation.coefficient}
-                        term1={annotation.term1}
-                        term2={annotation.term2}
-                        arcsShown={annotation.arcsShown}
-                      />
-                    </div>
-                  );
-                }
-                if (colIndex === startCol + 1) return null; // absorbed into the spanning cell above
-                // Matches DistributeDiagram's own paddingTop:34 exactly,
-                // so these cells sit at the same baseline as the equation
-                // text inside the (now taller) spanning cell, instead of
-                // being centered against the row's full height - which
-                // includes the arc space above that text - and landing
-                // too high.
-                const paddedStyle = { paddingTop: 34, ...style };
-                return colIndex === eqColumnIndex ? (
-                  <div key={`${rowKey}-${colIndex}`} style={paddedStyle}>
-                    <div
-                      style={{ textAlign: "center", color: "var(--ink-soft)", fontSize: 18, whiteSpace: "nowrap" }}
-                    >
-                      {cellValue.length > 0 ? <InlineMath math={cellValue} /> : null}
-                    </div>
-                  </div>
-                ) : (
-                  <div key={`${rowKey}-${colIndex}`} style={paddedStyle}>
-                    <Cell math={cellValue} color={color} align={termAlign} />
-                  </div>
-                );
-              });
-            }
-
-            if (isPairedRow(row)) {
-              const eq1Ann = rowIndex === 0 ? eq1Annotation : undefined;
-              const eq2Ann = rowIndex === 0 ? eq2Annotation : undefined;
-              return [
-                ...renderCellsOrArrow(row.eq1, `${rowIndex}-eq1`, colorFor(row.eq1Highlight), eq1Ann, -8),
-                ...renderCellsOrArrow(row.eq2, `${rowIndex}-eq2`, colorFor(row.eq2Highlight), eq2Ann),
-              ];
-            }
-
-            const color = colorFor(row.highlight);
-
-            // Row 0 (the original, never-updated expression) gets its two
-            // term columns merged into one spanning cell containing the
-            // arrow diagram, when this problem has one - this is what
-            // makes the arrows sit directly on the actual first line of
-            // the equation instead of floating as a separate duplicate
-            // above the grid. Every other row (including this same slot
-            // pair on later rows, once distribution is complete) renders
-            // normally.
-            const singleAnnotation = rowIndex === 0 ? distributeAnnotation : undefined;
-            return renderCellsOrArrow(row.cells, `${rowIndex}`, color, singleAnnotation);
-          })}
-        </div>
+        {connectorsToRender.map((rc, i) => (
+          <RowConnector key={i} containerRef={outerRef} fromSlotId={rc.fromSlotId} toSlotId={rc.toSlotId} />
+        ))}
+        {renderRowFlow(rows, slotIds)}
       </div>
+    </div>
   );
 }
 export default function StepSolver({
@@ -688,6 +987,31 @@ export default function StepSolver({
 
   const visibleRows: (GridRow | PairedGridRow)[] = slotOrder.map((id) => slotContent[id]);
 
+  // A second, UNGATED pass - applies every step's row updates
+  // regardless of progress, purely so the two-track layout can know the
+  // widest content a column will EVER hold (not just what's revealed so
+  // far) and lock that width in from the start. Without this, a grid
+  // column that auto-sizes to its current content visibly grows wider
+  // every time a later step reveals something wider, which drags
+  // everything already written in that column sideways with it - the
+  // opposite of what "looks like something written by hand" means.
+  const fullSlotOrder: string[] = ["__initial__"];
+  const fullSlotContent: Record<string, GridRow | PairedGridRow> = { __initial__: instance.initialRow };
+  for (const step of instance.steps) {
+    for (const update of step.rowUpdates) {
+      if (!(update.slotId in fullSlotContent)) fullSlotOrder.push(update.slotId);
+      fullSlotContent[update.slotId] = update.row;
+    }
+  }
+  const fullRows: (GridRow | PairedGridRow)[] = fullSlotOrder.map((id) => fullSlotContent[id]);
+
+  let boldActiveSlotId: string | null = null;
+  if (instance.boldAfter) {
+    const afterIdx = instance.steps.findIndex((s) => s.stepId === instance.boldAfter!.afterStepId);
+    const afterReached = afterIdx !== -1 && (stepIndex > afterIdx || (stepIndex === afterIdx && revealed));
+    if (afterReached) boldActiveSlotId = instance.boldAfter.slotId;
+  }
+
   // If this problem has distribute steps, figure out how many arcs
   // should be showing based on step POSITION relative to those two
   // steps, not just the current step's own reveal state - that's what
@@ -701,7 +1025,20 @@ export default function StepSolver({
     content: DistributeVisual,
     steps: SolverStep[],
     eqColIdx: number
-  ): { coefficient: string; term1: string; term2: string; arcsShown: 0 | 1 | 2; termCols: [number, number] } | undefined {
+  ):
+    | {
+        coefficient: string;
+        term1: string;
+        term2: string;
+        arcsShown: 0 | 1 | 2;
+        termCols: [number, number];
+        targetSlotId: string;
+        prefix?: string;
+        prefixColor?: string;
+        suffix?: string;
+        suffixColor?: string;
+      }
+    | undefined {
     if (content.chooseStepId) {
       const chooseIdx = steps.findIndex((s) => s.stepId === content.chooseStepId);
       const chooseReached = chooseIdx !== -1 && (stepIndex > chooseIdx || (stepIndex === chooseIdx && revealed));
@@ -719,9 +1056,22 @@ export default function StepSolver({
       else arcsShown = 2; // past both - stays at 2 regardless of later steps' own reveal state
     }
     // eqColumnIndex is 2 for expressionLeft (term cells at 0,1) or 1 for
-    // expressionRight (term cells at 2,3) - see eqColumnIndexFor.
-    const termCols: [number, number] = eqColIdx === 2 ? [0, 1] : [2, 3];
-    return { coefficient: content.coefficient, term1: content.term1, term2: content.term2, arcsShown, termCols };
+    // expressionRight (term cells at 2,3) - see eqColumnIndexFor. This
+    // only holds when there are exactly 2 term columns; content.termCols
+    // overrides it explicitly for a skill using more.
+    const termCols: [number, number] = content.termCols ?? (eqColIdx === 2 ? [0, 1] : [2, 3]);
+    return {
+      coefficient: content.coefficient,
+      term1: content.term1,
+      term2: content.term2,
+      arcsShown,
+      termCols,
+      targetSlotId: content.targetSlotId ?? "__initial__",
+      prefix: content.prefix,
+      prefixColor: content.prefixColor,
+      suffix: content.suffix,
+      suffixColor: content.suffixColor,
+    };
   }
 
   const eq1DistributeContent = instance.steps.find((s) => s.distributeVisual?.equation === "eq1")?.distributeVisual;
@@ -801,7 +1151,7 @@ export default function StepSolver({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr",
+          gridTemplateColumns: instance.panelRatio ?? "1fr 1fr",
           border: "1px solid var(--line)",
           borderRadius: 16,
           overflow: "hidden",
@@ -817,6 +1167,7 @@ export default function StepSolver({
           flexDirection: "column",
           gap: 16,
           minHeight: 320,
+          minWidth: 0,
         }}
       >
         <div
@@ -833,11 +1184,18 @@ export default function StepSolver({
         </div>
         <EquationGrid
           rows={visibleRows}
+          fullRows={fullRows}
+          fullSlotIds={fullSlotOrder}
+          boldSlotId={boldActiveSlotId}
+          slotIds={slotOrder}
           eqColumnIndex={instance.eqColumnIndex}
           distributeAnnotation={distributeAnnotation}
           eq1Annotation={eq1Annotation}
           eq2Annotation={eq2Annotation}
           termAlign={instance.termAlign}
+          rowConnectors={instance.rowConnectors}
+          trackLayout={instance.trackLayout}
+          pairedLayout={instance.pairedLayout}
         />
         {revealed && currentStep && (
           <div
@@ -857,12 +1215,13 @@ export default function StepSolver({
       {/* RIGHT: MCQ */}
       <div
         style={{
-          padding: "32px 28px",
+          padding: instance.questionPanelPadding ?? "32px 28px",
           display: "flex",
           flexDirection: "column",
           justifyContent: "center",
           gap: 14,
           minHeight: 320,
+          minWidth: 0,
         }}
       >
         {currentStep && (
@@ -904,6 +1263,8 @@ export default function StepSolver({
                     key={i}
                     onClick={() => handleChoice(i)}
                     style={{
+                      width: "100%",
+                      boxSizing: "border-box",
                       textAlign: isGraph ? "center" : "left",
                       padding: isGraph ? "10px 14px" : "16px 14px 10px 14px",
                       borderRadius: 10,
@@ -923,8 +1284,8 @@ export default function StepSolver({
                       fontSize: 14,
                       color: "var(--ink)",
                       lineHeight: 1.6,
-                      whiteSpace: isGraph ? "normal" : "nowrap",
-                      overflowX: isGraph ? "visible" : "auto",
+                      whiteSpace: "normal",
+                      overflowX: isGraph ? "visible" : "hidden",
                     }}
                   >
                     {isGraph ? (
