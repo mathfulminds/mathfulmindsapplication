@@ -577,6 +577,22 @@ type ComputedAnnotation = {
   suffixColor?: string;
 };
 
+// eqColumnIndex marks the position of the "=" sign within a row's cells,
+// not a fixed offset from the total cell count - what it implies about
+// total cell count depends on orientation. expressionLeft-style rows
+// (2-term standard, eqColumnIndex=2, or substitution's 3-term
+// extension, eqColumnIndex=3) put "=" second-to-last, so total cells =
+// eqColumnIndex+2 holds correctly. expressionRight-style rows
+// (eqColumnIndex=1) put the constant BEFORE "=" and both expression
+// terms AFTER it instead - still 4 total cells, not eqColumnIndex+2=3.
+// Only eqColumnIndex=1 is ever produced for expressionRight (no 3+-term
+// variant of it currently exists), so this single special case covers
+// every real usage without needing every skill file to pass its own
+// total column count explicitly.
+function totalGridColumns(eqColumnIndex: number): number {
+  return eqColumnIndex === 1 ? 4 : eqColumnIndex + 2;
+}
+
 function EquationGrid({
   rows,
   slotIds,
@@ -828,7 +844,7 @@ function EquationGrid({
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: `repeat(${eqColumnIndex + 2}, auto)`,
+                gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex)}, auto)`,
                 columnGap: 14,
                 rowGap: 20,
                 alignItems: "center",
@@ -841,7 +857,7 @@ function EquationGrid({
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: `repeat(${eqColumnIndex + 2}, auto)`,
+                gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex)}, auto)`,
                 columnGap: 14,
                 rowGap: 20,
                 alignItems: "center",
@@ -856,7 +872,7 @@ function EquationGrid({
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: `repeat(${eqColumnIndex + 2}, auto)`,
+                gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex)}, auto)`,
                 columnGap: 14,
                 rowGap: 20,
                 alignItems: "center",
@@ -878,7 +894,7 @@ function EquationGrid({
         ref={outerRef}
         style={{
           display: "grid",
-          gridTemplateColumns: `repeat(${eqColumnIndex + 2}, auto)`,
+          gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex)}, auto)`,
           width: "fit-content",
           columnGap: 14,
           rowGap: 20,

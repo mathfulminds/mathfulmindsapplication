@@ -616,32 +616,27 @@ export function buildEliminationSolverInstance(inst: EliminationInstance): Solve
 
   // Handoff #2: once the known value is substituted in, the remaining
   // equation is exactly the two-step shape - reuse twoStepEquations.ts.
-  const backSubInstanceRaw = buildTwoStepInstance(
+  // variableFirst is passed conditionally (not hardcoded true) so the
+  // engine itself produces the correct column order - and correct
+  // sign-forcing on whichever term ends up second - directly. A
+  // hardcoded variableFirst:true followed by a blind column swap when
+  // unknownVar is "y" was the earlier approach, but a swap can't
+  // correctly re-sign a term after moving it - it either leaves a
+  // forced "+" on what's now the first term, or leaves the new second
+  // term without the forced sign it needs. Computing the right shape
+  // from the start avoids needing any correction at all.
+  const backSubInstance = buildTwoStepInstance(
     {
       a: subEqCoefUnknown,
       b: substitutedConstant,
       form: "multiply",
-      variableFirst: true,
+      variableFirst: unknownVar === "x",
       orientation: "expressionLeft",
       rhs: subEqRHS,
       solution: unknownValue,
     },
     unknownVar
   );
-  // Same column-swap fix as the combined-equation solve above: this
-  // engine always places the variable it's solving for in column 0,
-  // but this skill's rows always put x in column 0 and y in column 1.
-  const backSubInstance =
-    unknownVar === "y"
-      ? {
-          ...backSubInstanceRaw,
-          initialRow: swapCols01(backSubInstanceRaw.initialRow as GridRow),
-          steps: backSubInstanceRaw.steps.map((step) => ({
-            ...step,
-            rowUpdates: step.rowUpdates.map((u) => ({ ...u, row: swapCols01(u.row as GridRow) })),
-          })),
-        }
-      : backSubInstanceRaw;
 
   // Pending substitution row: the KNOWN variable's term shows as a
   // literal "(coefficient)(value)" - not yet computed - while the
@@ -690,7 +685,7 @@ export function buildEliminationSolverInstance(inst: EliminationInstance): Solve
       { slotId: "substituted", row: substitutionPendingRow },
     ],
     prompt: `We know $${knownVar} = ${knownValue}$. Which equation is simpler to substitute it into?`,
-    choices: shuffle([
+    choices: [
       {
         text: `Equation 1: $${a1}x ${renderMultiplyTerm(b1, "y", true)} = ${c1}$`,
         isCorrect: substituteIntoEq === 1,
@@ -701,7 +696,7 @@ export function buildEliminationSolverInstance(inst: EliminationInstance): Solve
         isCorrect: substituteIntoEq === 2,
         misconceptionTag: substituteIntoEq === 2 ? null : "chose_harder_equation_to_substitute_into",
       },
-    ]),
+    ],
     explanationOnCorrect: `The Equation ${substituteIntoEq} has the simpler coefficient to work with.`,
   };
 

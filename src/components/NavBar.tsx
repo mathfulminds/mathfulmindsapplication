@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 
 const tabs = [
+  { href: '/skills', label: 'Skills' },
   { href: '/students', label: 'Students' },
   { href: '/parents', label: 'Parents' },
   { href: '/teachers-schools', label: 'Teachers / Schools' },
