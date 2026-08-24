@@ -645,6 +645,26 @@ function EquationGrid({
     return flowRows.flatMap((row, rowIndex) => {
       const slotId = flowSlotIds[rowIndex];
 
+      if (!isPairedRow(row) && row.caption !== undefined) {
+        return [
+          <div
+            key={`${rowIndex}-caption`}
+            data-row-slot={slotId}
+            style={{
+              gridColumn: `1 / span ${totalGridColumns(eqColumnIndex, columnCount)}`,
+              textAlign: "center",
+              color: colorFor(row.highlight),
+              fontWeight: 700,
+              fontSize: 22,
+              whiteSpace: "normal",
+              padding: "4px 0",
+            }}
+          >
+            {row.caption}
+          </div>,
+        ];
+      }
+
       // Renders one equation's 4 cells (used directly for a normal
       // single-equation row, and twice - once per equation - for a
       // paired row). Cells stay in the SAME repeat(4,auto) grid track

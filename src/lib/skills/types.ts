@@ -25,6 +25,18 @@ export interface GridRow {
   // of a multi-phase skill (e.g. the elimination/scaling phase vs. the
   // substitution phase of systems of equations), not a correctness signal.
   highlight?: "success" | "phase-blue" | "phase-green" | "phase-red";
+  // Optional: renders this row as a single full-width text line instead
+  // of the normal per-column cells, ignoring `cells` entirely when set.
+  // For final answers that aren't an "x = value" equation - e.g. a
+  // qualitative verdict like "No Solution" or "Infinite Solutions" - since
+  // those don't fit the term/eq/term column shape at all. Not for
+  // mid-solve annotations: a caption revealed on an early step (before
+  // the actual answer) still lands in the same shared grid as every other
+  // row and should use normal cells, or it'll misrepresent what's been
+  // solved so far. Spans the whole grid as ONE item rather than
+  // splitting across columns, so it never forces those columns wider for
+  // every other row sharing the same grid.
+  caption?: string;
 }
 
 // Two equations shown together (used by systems-of-equations skills

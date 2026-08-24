@@ -23,6 +23,7 @@ const groups: SkillGroup[] = [
       { title: 'Fractional Coefficients', description: 'Solve equations where the variable has a fractional coefficient.', href: '/solve/fractional-coefficients' },
       { title: 'Non-Integer Solutions', description: 'Practice equations whose answers aren\u2019t whole numbers.', href: '/solve/non-integer-solutions' },
       { title: 'Variables on Both Sides', description: 'Collect the variable terms before isolating it.', href: '/solve/variables-both-sides' },
+      { title: 'Variables Both Sides Infinite or No Solutions', description: 'Recognize when an equation has no solution or infinitely many.', href: '/solve/variables-both-sides-infinite-or-no-solutions' },
     ],
   },
   {
