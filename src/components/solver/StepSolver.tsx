@@ -589,7 +589,8 @@ type ComputedAnnotation = {
 // variant of it currently exists), so this single special case covers
 // every real usage without needing every skill file to pass its own
 // total column count explicitly.
-function totalGridColumns(eqColumnIndex: number): number {
+function totalGridColumns(eqColumnIndex: number, columnCountOverride?: number): number {
+  if (columnCountOverride !== undefined) return columnCountOverride;
   return eqColumnIndex === 1 ? 4 : eqColumnIndex + 2;
 }
 
@@ -600,6 +601,7 @@ function EquationGrid({
   fullSlotIds,
   boldSlotId,
   eqColumnIndex,
+  columnCount,
   distributeAnnotation,
   eq1Annotation,
   eq2Annotation,
@@ -614,6 +616,7 @@ function EquationGrid({
   fullSlotIds?: string[];
   boldSlotId?: string | null;
   eqColumnIndex: number;
+  columnCount?: number;
   distributeAnnotation?: ComputedAnnotation;
   eq1Annotation?: ComputedAnnotation;
   eq2Annotation?: ComputedAnnotation;
@@ -844,7 +847,7 @@ function EquationGrid({
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex)}, auto)`,
+                gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex, columnCount)}, auto)`,
                 columnGap: 14,
                 rowGap: 20,
                 alignItems: "center",
@@ -857,7 +860,7 @@ function EquationGrid({
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex)}, auto)`,
+                gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex, columnCount)}, auto)`,
                 columnGap: 14,
                 rowGap: 20,
                 alignItems: "center",
@@ -872,7 +875,7 @@ function EquationGrid({
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex)}, auto)`,
+                gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex, columnCount)}, auto)`,
                 columnGap: 14,
                 rowGap: 20,
                 alignItems: "center",
@@ -894,7 +897,7 @@ function EquationGrid({
         ref={outerRef}
         style={{
           display: "grid",
-          gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex)}, auto)`,
+          gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex, columnCount)}, auto)`,
           width: "fit-content",
           columnGap: 14,
           rowGap: 20,
@@ -1205,6 +1208,7 @@ export default function StepSolver({
           boldSlotId={boldActiveSlotId}
           slotIds={slotOrder}
           eqColumnIndex={instance.eqColumnIndex}
+          columnCount={instance.columnCount}
           distributeAnnotation={distributeAnnotation}
           eq1Annotation={eq1Annotation}
           eq2Annotation={eq2Annotation}

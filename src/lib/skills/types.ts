@@ -181,6 +181,15 @@ export interface SolverInstance {
   // genuinely needs the extra width more than the question panel needs
   // the extra breathing room.
   questionPanelPadding?: string;
+  // Optional: explicit total column count for this instance's grid,
+  // overriding the eqColumnIndex-based inference. Needed when a row has
+  // more columns than the standard formula assumes for its eqColumnIndex -
+  // e.g. variables-on-both-sides, where BOTH sides are full two-term
+  // expressions (5 cells: term, term, "=", term, term) with eqColumnIndex=2,
+  // which collides with the standard 4-cell expressionLeft row that also
+  // uses eqColumnIndex=2. Left undefined for every skill where the existing
+  // formula already gives the right answer.
+  columnCount?: number;
   // Optional: bolds a specific row once a given step has been reached -
   // e.g. drawing attention back to the isolated equation the moment the
   // other variable's value is found, since that's the exact moment it

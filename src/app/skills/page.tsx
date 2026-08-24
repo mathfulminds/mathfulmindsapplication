@@ -22,6 +22,7 @@ const groups: SkillGroup[] = [
       { title: 'Equations with Parentheses', description: 'Distribute first, then solve.', href: '/solve/parentheses-equations' },
       { title: 'Fractional Coefficients', description: 'Solve equations where the variable has a fractional coefficient.', href: '/solve/fractional-coefficients' },
       { title: 'Non-Integer Solutions', description: 'Practice equations whose answers aren\u2019t whole numbers.', href: '/solve/non-integer-solutions' },
+      { title: 'Variables on Both Sides', description: 'Collect the variable terms before isolating it.', href: '/solve/variables-both-sides' },
     ],
   },
   {

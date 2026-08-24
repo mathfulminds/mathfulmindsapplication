@@ -95,6 +95,21 @@ export function assembleRow3(
   return [exprCell1, exprCell2, exprCell3, eqSymbol, constantCell];
 }
 
+// For rows where BOTH sides are their own two-term expression (e.g.
+// variables-on-both-sides: "3x + 5 = x - 7"), rather than one side being a
+// lone constant. Always 5 cells with "=" fixed at index 2 - use with
+// SolverInstance.columnCount set to 5, since this collides with the
+// standard 4-cell expressionLeft row at the same eqColumnIndex otherwise.
+export function assembleBothSides(
+  left1: string,
+  left2: string,
+  right1: string,
+  right2: string,
+  eqSymbol: string = "="
+): [string, string, string, string, string] {
+  return [left1, left2, eqSymbol, right1, right2];
+}
+
 export function eqColumnIndexFor(orientation: Orientation): 1 | 2 {
   return orientation === "expressionLeft" ? 2 : 1;
 }
