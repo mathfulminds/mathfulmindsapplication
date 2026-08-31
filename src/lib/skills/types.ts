@@ -140,10 +140,13 @@ export interface DistributeVisual {
 export interface SolverInstance {
   initialRow: GridRow | PairedGridRow; // always visible, before any step is answered
   steps: SolverStep[];
-  // Which of the 4 columns holds the equals sign for this instance. This
-  // depends on equation orientation (expression-first vs constant-first)
-  // and is fixed for the whole problem, but is NOT always column index 2.
-  eqColumnIndex: 0 | 1 | 2 | 3;
+  // Which column holds the equals sign for this instance. This depends
+  // on equation orientation/shape and is fixed for the whole problem.
+  // Most skills stay within 0-3 (four columns or fewer per side), but
+  // isn't bounded to that range - a skill with genuinely many term
+  // columns per side (e.g. multi-step equations with several like terms
+  // to combine) needs a correspondingly larger index.
+  eqColumnIndex: number;
   // Optional: right-align term cells instead of the default center
   // alignment. Center-aligning cells of different widths in the same
   // column (e.g. "y" vs "5y") doesn't guarantee the variable itself lines

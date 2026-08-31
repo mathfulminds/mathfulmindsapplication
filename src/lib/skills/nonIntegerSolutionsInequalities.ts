@@ -99,9 +99,9 @@ export function generateNonIntegerInequality(forcedMode?: Mode): NonIntegerInequ
 
 const PLAINTEXT_PREFIX = "PLAINTEXT:";
 
-function renderGridValue(f: Fraction, mode: Mode, forceSign: boolean = false): string {
-  if (mode === "fraction") return fractionToKatex(f, forceSign);
-  return PLAINTEXT_PREFIX + decimalExpansionToPlainText(f, forceSign);
+function renderGridValue(f: Fraction, mode: Mode, forceSign: boolean = false, addGap: boolean = true): string {
+  if (mode === "fraction") return fractionToKatex(f, forceSign, addGap);
+  return PLAINTEXT_PREFIX + decimalExpansionToPlainText(f, forceSign, addGap);
 }
 
 function renderPromptValue(f: Fraction, mode: Mode, forceSign: boolean = false): string {
@@ -157,7 +157,7 @@ export function buildNonIntegerSolverInstance(
 
   // --- Step A: eliminate the constant (never flips) ---
   const cancelValue: Fraction = { num: -b.num, den: b.den };
-  const cancelDisplay = renderGridValue(cancelValue, mode, true);
+  const cancelDisplay = renderGridValue(cancelValue, mode, true, false);
   const cancelExpr1 = bIsSecond ? BLANK : cancelDisplay;
   const cancelExpr2 = bIsSecond ? cancelDisplay : BLANK;
   const cancelRow: GridRow = {
@@ -404,6 +404,7 @@ export function buildNonIntegerSolverInstance(
     initialRow,
     steps,
     eqColumnIndex: eqColumnIndexFor(orientation),
+    termAlign: "right",
   };
 }
 

@@ -63,7 +63,7 @@ export function buildSolverInstance(
   const aPositive = a >= 0;
   const opSym = aPositive ? "-" : "+"; // undo +a by subtracting, undo -a by adding
 
-  const cancelVarDisplay = renderMultiplyTerm(-a, x, true);
+  const cancelVarDisplay = renderMultiplyTerm(-a, x, true, false);
   const cancelVarRow: GridRow = {
     cells: assembleBothSides(cancelVarDisplay, BLANK, cancelVarDisplay, BLANK, ""),
   };
@@ -152,6 +152,7 @@ export function buildSolverInstance(
     steps: [goal1, cancel1, interpret],
     eqColumnIndex: 2,
     columnCount: 5,
+    termAlign: "right",
   };
 }
 

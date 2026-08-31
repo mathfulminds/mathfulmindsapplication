@@ -14,6 +14,7 @@ import {
   renderMultiplyTerm,
   shuffle,
   signedWord,
+  SIGN_GAP,
 } from "./isolateVariableCore";
 import {
   ComparisonSymbol,
@@ -179,7 +180,7 @@ export function buildOneStepInstance(
     const constantNatural = renderConstant(b);
     const constantForced = renderConstant(b, true);
     const exprTerm1 = variableFirst ? variableSymbol : constantNatural;
-    const exprTerm2 = variableFirst ? constantForced : `+\\,${variableSymbol}`;
+    const exprTerm2 = variableFirst ? constantForced : `+${SIGN_GAP}${variableSymbol}`;
     const bIsSecond = variableFirst;
 
     const initialRow: GridRow = {
@@ -187,7 +188,7 @@ export function buildOneStepInstance(
     };
 
     const cancelValue = -b;
-    const cancelDisplay = renderConstant(cancelValue, true);
+    const cancelDisplay = renderConstant(cancelValue, true, false);
     const cancelExpr1 = bIsSecond ? BLANK : cancelDisplay;
     const cancelExpr2 = bIsSecond ? cancelDisplay : BLANK;
     const cancelRow: GridRow = {
@@ -273,6 +274,7 @@ export function buildOneStepInstance(
       initialRow,
       steps: [stepOne, stepOneFlip, stepTwo, ...tailSteps],
       eqColumnIndex: eqColumnIndexFor(orientation),
+      termAlign: "right",
     };
   }
 
@@ -405,6 +407,7 @@ export function buildOneStepInstance(
     initialRow,
     steps: [stepOne, stepOneFlip, stepTwo, ...tailSteps],
     eqColumnIndex: eqColumnIndexFor(orientation),
+    termAlign: "right",
   };
 }
 

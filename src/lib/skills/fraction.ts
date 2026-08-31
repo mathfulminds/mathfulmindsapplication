@@ -3,6 +3,8 @@
 // simplification are always exact, the same guarantee our integer-based
 // skills have relied on all along.
 
+import { SIGN_GAP } from "./isolateVariableCore";
+
 export interface Fraction {
   num: number; // integer, carries the sign
   den: number; // positive integer, always >= 1
@@ -119,7 +121,7 @@ export function decimalExpansion(f: Fraction): DecimalExpansion {
 
 export function decimalExpansionToKatex(f: Fraction, forceSign: boolean = false): string {
   const { sign, integerPart, nonRepeating, repeating } = decimalExpansion(f);
-  const signStr = sign < 0 ? "-" : forceSign ? "+\\,": "";
+  const signStr = !forceSign ? (sign < 0 ? "-" : "") : sign < 0 ? `-${SIGN_GAP}` : `+${SIGN_GAP}`;
   let body = `${integerPart}`;
   if (nonRepeating.length > 0 || repeating.length > 0) {
     body += "." + nonRepeating;
@@ -146,9 +148,10 @@ export const NUMBER_END = "\u0004";
 export const OVERLINE_START = "\u0001";
 export const OVERLINE_END = "\u0002";
 
-export function decimalExpansionToPlainText(f: Fraction, forceSign: boolean = false): string {
+export function decimalExpansionToPlainText(f: Fraction, forceSign: boolean = false, addGap: boolean = true): string {
   const { sign, integerPart, nonRepeating, repeating } = decimalExpansion(f);
-  const signStr = sign < 0 ? "-" : forceSign ? "+" : "";
+  const gap = addGap ? SIGN_GAP : "";
+  const signStr = !forceSign ? (sign < 0 ? "-" : "") : sign < 0 ? `-${gap}` : `+${gap}`;
   let body = `${integerPart}`;
   if (nonRepeating.length > 0 || repeating.length > 0) {
     body += "." + nonRepeating;
@@ -193,15 +196,16 @@ export function decimalOffByOneKatex(f: Fraction): string {
 
 // KaTeX rendering of a reduced fraction. Whole numbers render as plain
 // integers, not as a fraction with denominator 1.
-export function fractionToKatex(f: Fraction, forceSign: boolean = false): string {
+export function fractionToKatex(f: Fraction, forceSign: boolean = false, addGap: boolean = true): string {
+  const gap = addGap ? SIGN_GAP : "";
   if (f.den === 1) {
-    if (forceSign && f.num >= 0) return `+\\,${f.num}`;
-    return `${f.num}`;
+    if (!forceSign) return `${f.num}`;
+    return f.num >= 0 ? `+${gap}${f.num}` : `-${gap}${Math.abs(f.num)}`;
   }
   const abs = Math.abs(f.num);
   const core = `\\dfrac{${abs}}{${f.den}}`;
-  if (f.num < 0) return `-${core}`;
-  return forceSign ? `+\\,${core}` : core;
+  if (!forceSign) return f.num < 0 ? `-${core}` : core;
+  return f.num >= 0 ? `+${gap}${core}` : `-${gap}${core}`;
 }
 
 // Plain-text rendering for MCQ prompt/choice strings (wrapped in $...$

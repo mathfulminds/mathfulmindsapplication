@@ -22,8 +22,11 @@ const groups: SkillGroup[] = [
       { title: 'Equations with Parentheses', description: 'Distribute first, then solve.', href: '/solve/parentheses-equations' },
       { title: 'Fractional Coefficients', description: 'Solve equations where the variable has a fractional coefficient.', href: '/solve/fractional-coefficients' },
       { title: 'Non-Integer Solutions', description: 'Practice equations whose answers aren\u2019t whole numbers.', href: '/solve/non-integer-solutions' },
+      { title: 'Combining Like Terms', description: 'Combine like terms on one side before isolating the variable.', href: '/solve/combining-like-terms' },
       { title: 'Variables on Both Sides', description: 'Collect the variable terms before isolating it.', href: '/solve/variables-both-sides' },
       { title: 'Variables Both Sides Infinite or No Solutions', description: 'Recognize when an equation has no solution or infinitely many.', href: '/solve/variables-both-sides-infinite-or-no-solutions' },
+      { title: 'Multi-Step Equations (No Parentheses)', description: 'Combine like terms on either side, then solve.', href: '/solve/multi-step-equations-no-parentheses' },
+      { title: 'Multi-Step Equations (With Parentheses)', description: 'Distribute and combine like terms on either side, then solve.', href: '/solve/multi-step-equations-with-parentheses' },
     ],
   },
   {

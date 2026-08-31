@@ -67,7 +67,7 @@ export function buildFractionSolverInstance(
   // Step 1: eliminate the constant term - identical pattern to every
   // other skill built on this core.
   const cancelValue = -b;
-  const cancelDisplay = renderConstant(cancelValue, true);
+  const cancelDisplay = renderConstant(cancelValue, true, false);
   const cancelExpr1 = bIsSecond ? BLANK : cancelDisplay;
   const cancelExpr2 = bIsSecond ? cancelDisplay : BLANK;
   const cancelRow: GridRow = {
@@ -206,6 +206,7 @@ export function buildFractionSolverInstance(
     initialRow,
     steps: [stepA, stepB, stepC],
     eqColumnIndex: eqColumnIndexFor(orientation),
+    termAlign: "right",
   };
 }
 

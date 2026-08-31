@@ -1,5 +1,5 @@
 import type { SolverInstance, SolverStep, Choice, PairedGridRow, GridRow } from "./types";
-import { assembleRow, BLANK, randBool, randInt, randSign, renderConstant, renderMultiplyTerm, shuffle } from "./isolateVariableCore";
+import { assembleRow, BLANK, randBool, randInt, randSign, renderConstant, renderMultiplyTerm, shuffle, SIGN_GAP } from "./isolateVariableCore";
 import { buildOneStepInstance } from "./oneStepEquations";
 import { buildSolverInstance as buildTwoStepInstance } from "./twoStepEquations";
 
@@ -651,12 +651,11 @@ export function buildEliminationSolverInstance(inst: EliminationInstance): Solve
   // stand out the same way the scaling phase's multiplier does.
   function substitutedTermDisplay(coef: number, value: number, forceSign: boolean): string {
     const valueStr = `(\\textcolor{${BLUE_HEX}}{${value}})`;
-    let core: string;
-    if (coef === 1) core = valueStr;
-    else if (coef === -1) core = `-${valueStr}`;
-    else core = `${coef}${valueStr}`;
-    if (forceSign && coef >= 0) core = `+\\,${core}`;
-    return core;
+    const absCoef = Math.abs(coef);
+    const core = absCoef === 1 ? valueStr : `${absCoef}${valueStr}`;
+    if (!forceSign) return coef < 0 ? `-${core}` : core;
+    const sign = coef >= 0 ? "+" : "-";
+    return `${sign}${SIGN_GAP}${core}`;
   }
 
   // Fixed x-then-y column ordering, matching chosen_equation's own

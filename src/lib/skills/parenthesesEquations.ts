@@ -133,6 +133,7 @@ export function buildParenSolverInstance(
     initialRow,
     steps: [distributeFirstTerm, distributeSecondTerm, ...twoStep.steps],
     eqColumnIndex: eqColumnIndexFor(orientation),
+    termAlign: "right",
   };
 }
 

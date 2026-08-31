@@ -1,5 +1,5 @@
 import type { SolverInstance, SolverStep, Choice, PairedGridRow, GridRow } from "./types";
-import { assembleRow, assembleRow3, BLANK, randBool, randInt, randSign, renderConstant, renderMultiplyTerm, shuffle } from "./isolateVariableCore";
+import { assembleRow, assembleRow3, BLANK, randBool, randInt, randSign, renderConstant, renderMultiplyTerm, shuffle, SIGN_GAP } from "./isolateVariableCore";
 import { buildSolverInstance as buildTwoStepInstance } from "./twoStepEquations";
 
 // This skill uses 3 term columns (not the usual 2), since the expand
@@ -187,7 +187,7 @@ export function buildSubstitutionSolverInstance(inst: SubstitutionInstance): Sol
   // used in twoStepEquations.ts, rather than jumping straight to the
   // simplified result.
   const movingTermCoef = -otherCoefInIsolateEq; // the value being added/subtracted to cancel the original term
-  const movingTermText = renderMultiplyTerm(movingTermCoef, remainingVar, true);
+  const movingTermText = renderMultiplyTerm(movingTermCoef, remainingVar, true, false);
   const cancelRow: GridRow = {
     cells:
       isolateVar === "x"
@@ -360,7 +360,7 @@ export function buildSubstitutionSolverInstance(inst: SubstitutionInstance): Sol
   const keptTermNatural = renderMultiplyTerm(keptCoef, remainingVar);
   const keptTermForced = renderMultiplyTerm(keptCoef, remainingVar, true);
   const distConstNatural = renderConstant(distributedConst);
-  const distConstForced = distributedConst >= 0 ? `+\\,${distributedConst}` : `${distributedConst}`;
+  const distConstForced = distributedConst >= 0 ? `+${SIGN_GAP}${distributedConst}` : `-${SIGN_GAP}${Math.abs(distributedConst)}`;
   const distVarNatural = renderMultiplyTerm(distributedVarCoef, remainingVar);
   const distVarForced = renderMultiplyTerm(distributedVarCoef, remainingVar, true);
   const combinedForced = renderMultiplyTerm(combinedVarCoef, remainingVar, true);
@@ -404,7 +404,7 @@ export function buildSubstitutionSolverInstance(inst: SubstitutionInstance): Sol
     ]),
     explanationOnCorrect: `$${multiplierCoef} \\times ${isoTerm1} = ${distributedConst}$.`,
     distributeVisual: {
-      coefficient: isolateVar === "y" ? (multiplierCoef >= 0 ? `\\textcolor{${otherHex}}{+\\,${multiplierCoef}}` : `\\textcolor{${otherHex}}{${multiplierCoef}}`) : `\\textcolor{${otherHex}}{${multiplierCoef}}`,
+      coefficient: isolateVar === "y" ? (multiplierCoef >= 0 ? `\\textcolor{${otherHex}}{+${SIGN_GAP}${multiplierCoef}}` : `\\textcolor{${otherHex}}{${multiplierCoef}}`) : `\\textcolor{${otherHex}}{${multiplierCoef}}`,
       term1: `\\textcolor{${isolateHex}}{${isoTerm1Text}}`,
       term2: `\\textcolor{${isolateHex}}{${isoTerm2TextForced}}`,
       targetSlotId: "substitute",

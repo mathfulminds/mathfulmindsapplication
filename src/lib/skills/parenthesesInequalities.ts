@@ -123,6 +123,7 @@ export function buildParenInequalitySolverInstance(
     initialRow,
     steps: [distributeFirstTerm, distributeSecondTerm, ...twoStep.steps],
     eqColumnIndex: eqColumnIndexFor(orientation),
+    termAlign: "right",
   };
 }
 

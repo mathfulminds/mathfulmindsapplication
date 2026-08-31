@@ -73,7 +73,7 @@ export function buildSolverInstance(
   };
 
   const cancelValue = -b;
-  const cancelDisplay = renderConstant(cancelValue, true);
+  const cancelDisplay = renderConstant(cancelValue, true, false);
   const cancelExpr1 = bIsSecond ? BLANK : cancelDisplay;
   const cancelExpr2 = bIsSecond ? cancelDisplay : BLANK;
   const cancelRow: GridRow = {
@@ -268,6 +268,7 @@ export function buildSolverInstance(
     initialRow,
     steps: [stepA, stepB, stepC],
     eqColumnIndex: eqColumnIndexFor(orientation),
+    termAlign: "right",
   };
 }
 

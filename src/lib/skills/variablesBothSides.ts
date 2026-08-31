@@ -86,7 +86,7 @@ export function buildSolverInstance(
     return out;
   }
 
-  const cancelVarDisplay = renderMultiplyTerm(-aRight, x, true);
+  const cancelVarDisplay = renderMultiplyTerm(-aRight, x, true, false);
   const cancelVarRow: GridRow = {
     cells: assembleBothSides(cancelVarDisplay, BLANK, cancelVarDisplay, BLANK, ""),
   };
@@ -99,7 +99,7 @@ export function buildSolverInstance(
   const goal1: SolverStep = {
     stepId: "goal_variable_left",
     rowUpdates: [{ slotId: "cancel_var_annotation", row: cancelVarRow }],
-    prompt: `Start with the variable. What undoes ${plainSignedTerm(aRight, x)}?`,
+    prompt: `Let's move the variable to the left side. What undoes ${plainSignedTerm(aRight, x)}?`,
     choices: shuffle([
       { text: correctOp1Text, isCorrect: true, misconceptionTag: null },
       {
@@ -174,7 +174,7 @@ export function buildSolverInstance(
   const op2Sym = bLeft >= 0 ? "-" : "+";
   const newRhs = bRight - bLeft;
 
-  const cancelConstDisplay = renderConstant(-bLeft, true);
+  const cancelConstDisplay = renderConstant(-bLeft, true, false);
   const cancelConstRow: GridRow = {
     cells: assembleBothSides(BLANK, cancelConstDisplay, BLANK, cancelConstDisplay, ""),
   };
@@ -187,7 +187,7 @@ export function buildSolverInstance(
   const goal2: SolverStep = {
     stepId: "goal_constant_right",
     rowUpdates: [{ slotId: "cancel_const_annotation", row: cancelConstRow }],
-    prompt: `Now let's focus on the constant. What undoes ${plainSignedConst(bLeft)}?`,
+    prompt: `Let's move the constant to the right side. What undoes ${plainSignedConst(bLeft)}?`,
     choices: shuffle([
       {
         text: correctOp2Text,
@@ -339,6 +339,7 @@ export function buildSolverInstance(
     steps: [goal1, cancel1, combine1, goal2, cancel2, combine2, step3, step4],
     eqColumnIndex: 2,
     columnCount: 5,
+    termAlign: "right",
   };
 }
 

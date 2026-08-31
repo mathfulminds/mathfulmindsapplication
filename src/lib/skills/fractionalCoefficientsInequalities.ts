@@ -78,7 +78,7 @@ export function buildFractionSolverInstance(
 
   // --- Step A: eliminate the constant (never flips) ---
   const cancelValue = -b;
-  const cancelDisplay = renderConstant(cancelValue, true);
+  const cancelDisplay = renderConstant(cancelValue, true, false);
   const cancelExpr1 = bIsSecond ? BLANK : cancelDisplay;
   const cancelExpr2 = bIsSecond ? cancelDisplay : BLANK;
   const cancelRow: GridRow = {
@@ -307,6 +307,7 @@ export function buildFractionSolverInstance(
     initialRow,
     steps,
     eqColumnIndex: eqColumnIndexFor(orientation),
+    termAlign: "right",
   };
 }
 

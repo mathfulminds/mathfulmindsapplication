@@ -23,31 +23,53 @@ export function randMultiplyCoefficient(): number {
 
 export const BLANK = "\\phantom{0}";
 
-export function renderConstant(value: number, forceSign: boolean = false): string {
-  if (forceSign && value >= 0) return `+\\,${value}`;
-  return `${value}`;
+// The grid's own column gap is a fixed 14px, at the equation area's fixed
+// 21px font-size (both confirmed constant across every skill). This is
+// the KaTeX equivalent of that same 14px, so the space AFTER a forced
+// sign visually matches the space BEFORE it (from the grid gap) exactly,
+// instead of the much smaller "\," thin-space, which - at 0.167em, ~3-4px
+// - made a sign look glued to the term after it rather than sitting
+// centered between both neighbors like a normal +/- should.
+export const SIGN_GAP = "\\hspace{0.6667em}";
+
+export function renderConstant(value: number, forceSign: boolean = false, addGap: boolean = true): string {
+  // Leading position (forceSign=false): sign always hugs the value
+  // tightly, whatever the sign - "-5", "5". A forced sign in a REAL row
+  // (addGap=true, the default) needs breathing room either way - "- 5",
+  // "+ 5" - so a reader sees it as a term boundary between two visible
+  // neighbors. But a standalone cancel-annotation ("what undoes +2?"
+  // shown alone, with the rest of that row blank) has no neighbor to
+  // separate from - forceSign=true, addGap=false shows the sign (still
+  // required - the annotation IS the sign) without adding a gap that
+  // would just be misplaced empty space with nothing on either side of it.
+  if (!forceSign) return `${value}`;
+  const sign = value >= 0 ? "+" : "-";
+  const gap = addGap ? SIGN_GAP : "";
+  return `${sign}${gap}${Math.abs(value)}`;
 }
 
 export function renderMultiplyTerm(
   coef: number,
   symbol: string,
-  forceSign: boolean = false
+  forceSign: boolean = false,
+  addGap: boolean = true
 ): string {
-  let core: string;
-  if (coef === 1) core = symbol;
-  else if (coef === -1) core = `-${symbol}`;
-  else core = `${coef}${symbol}`;
-  if (forceSign && coef >= 0) core = `+\\,${core}`;
-  return core;
+  const absCoef = Math.abs(coef);
+  const core = absCoef === 1 ? symbol : `${absCoef}${symbol}`;
+  if (!forceSign) return coef < 0 ? `-${core}` : core;
+  const sign = coef >= 0 ? "+" : "-";
+  const gap = addGap ? SIGN_GAP : "";
+  return `${sign}${gap}${core}`;
 }
 
 export function renderDivideTerm(
   divisor: number,
   symbol: string,
-  forceSign: boolean = false
+  forceSign: boolean = false,
+  addGap: boolean = true
 ): string {
   const core = `\\dfrac{${symbol}}{${divisor}}`;
-  return forceSign ? `+\\,${core}` : core;
+  return forceSign ? `+${addGap ? SIGN_GAP : ""}${core}` : core;
 }
 
 export function signedWord(value: number): string {
@@ -132,12 +154,14 @@ export function renderFractionTerm(
   n: number,
   d: number,
   symbol: string,
-  forceSign: boolean = false
+  forceSign: boolean = false,
+  addGap: boolean = true
 ): string {
   const abs = Math.abs(n);
   const frac = `\\dfrac{${abs}}{${d}}${symbol}`;
-  if (n < 0) return `-${frac}`;
-  return forceSign ? `+\\,${frac}` : frac;
+  if (!forceSign) return n < 0 ? `-${frac}` : frac;
+  const sign = n >= 0 ? "+" : "-";
+  return `${sign}${addGap ? SIGN_GAP : ""}${frac}`;
 }
 
 // Reciprocal of n/d, rendered as its own signed fraction (not simplified),
