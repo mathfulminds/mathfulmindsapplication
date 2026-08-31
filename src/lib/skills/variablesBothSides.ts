@@ -231,8 +231,17 @@ export function buildSolverInstance(
     explanationOnCorrect: `The constants are opposites resulting in 0.`,
   };
 
+  // If the combined coefficient is already 1, dividing by it is a no-op -
+  // "x = value" is already fully solved the moment this row appears, so
+  // this becomes the final step instead of continuing into a redundant
+  // "divide by 1" / "confirm 1 ÷ 1 = 1" pair. A coefficient of -1 still
+  // needs the divide phase - flipping every sign is a real operation,
+  // not a no-op, even though the magnitude is also 1.
+  const needsDivide = newA !== 1;
+
   const afterConstRow: GridRow = {
     cells: assembleBothSides(renderMultiplyTerm(newA, x), BLANK, BLANK, renderConstant(newRhs)),
+    ...(needsDivide ? {} : { highlight: "success" as const }),
   };
 
   const combine2Correct = `${newRhs}`;
@@ -252,7 +261,9 @@ export function buildSolverInstance(
       { text: combine2Distractors[0].text, isCorrect: false, misconceptionTag: combine2Distractors[0].tag },
       { text: combine2Distractors[1].text, isCorrect: false, misconceptionTag: combine2Distractors[1].tag },
     ]),
-    explanationOnCorrect: `The terms combine to ${newRhs}. The rest of the equation gets brought down unchanged.`,
+    explanationOnCorrect: needsDivide
+      ? `The terms combine to ${newRhs}. The rest of the equation gets brought down unchanged.`
+      : `The terms combine to ${newRhs}. Since the coefficient of ${x} is already 1, this is the final answer: ${x} = ${newRhs}.`,
   };
 
   // ---------- Phase 3: divide by the combined coefficient ----------
@@ -303,7 +314,37 @@ export function buildSolverInstance(
     explanationOnCorrect: `The coefficient ${newA} cancels when you divide both sides by ${newA}.`,
   };
 
-  // ---------- Phase 4: compute the final value ----------
+  // ---------- Phase 4: confirm the coefficient becomes 1 ----------
+  // A NEW line, not a continuation of the fraction line above - so the
+  // fraction setup (e.g. "12x/12 = -84/12") stays visible permanently,
+  // and this is a genuinely new piece of information (the variable is
+  // now isolated), matching the same pattern used in the multi-step
+  // no-parentheses skill. The right side stays blank here - it hasn't
+  // been computed yet, so it isn't repeated a second time; compute_value
+  // fills it in on this same line below.
+  const coeffConfirmedRow: GridRow = {
+    cells: assembleBothSides(x, BLANK, BLANK, BLANK),
+  };
+
+  const coeffOneDistractors = dedupNumeric("1", [
+    { text: `${newA}`, tag: "forgot_to_apply_operation" },
+    { text: "0", tag: "confuses_division_with_subtraction_pattern" },
+    { text: `${-newA}`, tag: "sign_error" },
+  ]);
+
+  const confirmCoefficientOne: SolverStep = {
+    stepId: "confirm_coefficient_one",
+    rowUpdates: [{ slotId: "coefficient_confirmed", row: coeffConfirmedRow }],
+    prompt: `What is ${newA} \u00f7 ${newA}?`,
+    choices: shuffle([
+      { text: "1", isCorrect: true, misconceptionTag: null },
+      { text: coeffOneDistractors[0].text, isCorrect: false, misconceptionTag: coeffOneDistractors[0].tag },
+      { text: coeffOneDistractors[1].text, isCorrect: false, misconceptionTag: coeffOneDistractors[1].tag },
+    ]),
+    explanationOnCorrect: `The coefficient ${newA} divided by itself is 1, so the variable is isolated.`,
+  };
+
+  // ---------- Phase 5: compute the final value ----------
 
   const finalRow: GridRow = {
     cells: assembleBothSides(x, BLANK, BLANK, renderConstant(solution)),
@@ -322,7 +363,10 @@ export function buildSolverInstance(
 
   const step4: SolverStep = {
     stepId: "compute_value",
-    rowUpdates: [{ slotId: "final", row: finalRow }],
+    // Same slot as confirm_coefficient_one - fills in the answer on the
+    // SAME line that already showed the isolated variable, rather than
+    // starting yet another new line.
+    rowUpdates: [{ slotId: "coefficient_confirmed", row: finalRow }],
     prompt: `${newRhs} \u00f7 ${newA} = ? What is the value of ${x}?`,
     choices: shuffle([
       { text: correctText, isCorrect: true, misconceptionTag: null },
@@ -336,7 +380,9 @@ export function buildSolverInstance(
 
   return {
     initialRow,
-    steps: [goal1, cancel1, combine1, goal2, cancel2, combine2, step3, step4],
+    steps: needsDivide
+      ? [goal1, cancel1, combine1, goal2, cancel2, combine2, step3, confirmCoefficientOne, step4]
+      : [goal1, cancel1, combine1, goal2, cancel2, combine2],
     eqColumnIndex: 2,
     columnCount: 5,
     termAlign: "right",
