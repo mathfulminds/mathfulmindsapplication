@@ -119,9 +119,16 @@ export function buildSolverInstance(
   const absB = Math.abs(b);
   const opSym = bPositive ? "-" : "+";
 
-  const cancelDisplay = renderConstant(-b, true, false);
+  // Position 2 (b's own column) is a non-leading position everywhere else
+  // it appears in this equation, so its annotation needs the same gap a
+  // real forced term there would have. Position 4 (the sole right-side
+  // column) is leading/only-term-on-its-side, so it stays gap-free -
+  // matching the per-column rule established for the other skills,
+  // rather than a blanket "no gap" that would misalign with the real row.
+  const cancelDisplayCol2 = renderConstant(-b, true);
+  const cancelDisplayCol4 = renderConstant(-b, true, false);
   const cancelRow: GridRow = {
-    cells: assembleRow3(BLANK, BLANK, cancelDisplay, cancelDisplay, ""),
+    cells: assembleRow3(BLANK, BLANK, cancelDisplayCol2, cancelDisplayCol4, ""),
   };
 
   const correctOpText = bPositive ? `Subtracting ${absB} from both sides` : `Adding ${absB} to both sides`;
@@ -149,8 +156,18 @@ export function buildSolverInstance(
   // ---------- Step 3: arithmetic - the constant cancels ----------
 
   const newRhs = c - b;
+
+  // If the combined coefficient is already 1, dividing by it is a no-op -
+  // "x = value" is already fully solved the moment this row appears, so
+  // this becomes the final step instead of continuing into a redundant
+  // "divide by 1" / "confirm 1 ÷ 1 = 1" pair. A coefficient of -1 still
+  // needs the divide phase - flipping every sign is a real operation,
+  // not a no-op, even though the magnitude is also 1.
+  const needsDivide = combinedA !== 1;
+
   const reducedRow: GridRow = {
     cells: assembleRow3(plainTerm(combinedA, x), BLANK, BLANK, renderConstant(newRhs)),
+    ...(needsDivide ? {} : { highlight: "success" as const }),
   };
 
   const cancelDistractors = dedupNumeric("0", [
@@ -167,7 +184,9 @@ export function buildSolverInstance(
       { text: cancelDistractors[0].text, isCorrect: false, misconceptionTag: cancelDistractors[0].tag },
       { text: cancelDistractors[1].text, isCorrect: false, misconceptionTag: cancelDistractors[1].tag },
     ]),
-    explanationOnCorrect: "The constants are opposites resulting in 0.",
+    explanationOnCorrect: needsDivide
+      ? "The constants are opposites resulting in 0."
+      : `The constants are opposites resulting in 0. Since the coefficient of ${x} is already 1, this is the final answer: ${x} = ${newRhs}.`,
   };
 
   // ---------- Step 4: divide by the combined coefficient ----------
@@ -211,7 +230,36 @@ export function buildSolverInstance(
     explanationOnCorrect: `The coefficient ${combinedA} cancels when you divide both sides by ${combinedA}.`,
   };
 
-  // ---------- Step 5: compute the final value ----------
+  // ---------- Step 5: confirm the coefficient becomes 1 ----------
+  // A NEW line, not a continuation of the fraction line above - so the
+  // fraction setup (e.g. "3x/3 = 21/3") stays visible permanently, and
+  // this is a genuinely new piece of information (the variable is now
+  // isolated). The right side stays blank here - it hasn't been computed
+  // yet, so it isn't repeated a second time; compute_value fills it in
+  // on this same line below.
+  const coeffConfirmedRow: GridRow = {
+    cells: assembleRow3(x, BLANK, BLANK, BLANK),
+  };
+
+  const coeffOneDistractors = dedupNumeric("1", [
+    { text: `${combinedA}`, tag: "forgot_to_apply_operation" },
+    { text: "0", tag: "confuses_division_with_subtraction_pattern" },
+    { text: `${-combinedA}`, tag: "sign_error" },
+  ]);
+
+  const confirmCoefficientOne: SolverStep = {
+    stepId: "confirm_coefficient_one",
+    rowUpdates: [{ slotId: "coefficient_confirmed", row: coeffConfirmedRow }],
+    prompt: `What is ${combinedA} \u00f7 ${combinedA}?`,
+    choices: shuffle([
+      { text: "1", isCorrect: true, misconceptionTag: null },
+      { text: coeffOneDistractors[0].text, isCorrect: false, misconceptionTag: coeffOneDistractors[0].tag },
+      { text: coeffOneDistractors[1].text, isCorrect: false, misconceptionTag: coeffOneDistractors[1].tag },
+    ]),
+    explanationOnCorrect: `The coefficient ${combinedA} divided by itself is 1, so the variable is isolated.`,
+  };
+
+  // ---------- Step 6: compute the final value ----------
 
   const finalRow: GridRow = {
     cells: assembleRow3(x, BLANK, BLANK, renderConstant(solution)),
@@ -229,7 +277,10 @@ export function buildSolverInstance(
 
   const computeValue: SolverStep = {
     stepId: "compute_value",
-    rowUpdates: [{ slotId: "final", row: finalRow }],
+    // Same slot as confirm_coefficient_one - fills in the answer on the
+    // SAME line that already showed the isolated variable, rather than
+    // starting yet another new line.
+    rowUpdates: [{ slotId: "coefficient_confirmed", row: finalRow }],
     prompt: `${newRhs} \u00f7 ${combinedA} = ? What is the value of ${x}?`,
     choices: shuffle([
       { text: correctText, isCorrect: true, misconceptionTag: null },
@@ -243,7 +294,9 @@ export function buildSolverInstance(
 
   return {
     initialRow,
-    steps: [combine, goal, cancelConstant, divide, computeValue],
+    steps: needsDivide
+      ? [combine, goal, cancelConstant, divide, confirmCoefficientOne, computeValue]
+      : [combine, goal, cancelConstant],
     eqColumnIndex: 3,
     termAlign: "right",
   };
