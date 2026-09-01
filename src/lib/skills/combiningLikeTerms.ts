@@ -1,20 +1,14 @@
 import type { SolverInstance, SolverStep, Choice, GridRow } from "./types";
-import {
-  BLANK,
-  assembleRow3,
-  randBool,
-  randInt,
-  renderConstant,
-  renderMultiplyTerm,
-  signedWord,
-} from "./isolateVariableCore";
+import type { Orientation } from "./isolateVariableCore";
+import { BLANK, randBool, randInt, renderConstant, renderMultiplyTerm, signedWord } from "./isolateVariableCore";
 
 interface EquationInstance {
-  a1: number; // first x-coefficient on the left
-  a2: number; // second x-coefficient on the left, to be combined with a1
-  b: number; // left side's constant
-  c: number; // right side's constant
+  a1: number; // first x-coefficient on the expression side
+  a2: number; // second x-coefficient on the expression side, to be combined with a1
+  b: number; // expression side's constant
+  c: number; // the lone constant on the other side
   solution: number;
+  orientation: Orientation; // which side the expression (a1x + a2x + b) sits on
 }
 
 export function generateEquation(): EquationInstance {
@@ -29,8 +23,9 @@ export function generateEquation(): EquationInstance {
   while (solution === 0) solution = randInt(-12, 12);
 
   const c = (a1 + a2) * solution + b;
+  const orientation: Orientation = randBool() ? "expressionLeft" : "expressionRight";
 
-  return { a1, a2, b, c, solution };
+  return { a1, a2, b, c, solution, orientation };
 }
 
 function plainTerm(coef: number, symbol: string): string {
@@ -67,19 +62,42 @@ export function buildSolverInstance(
   eq: EquationInstance,
   variableSymbol: string = "x"
 ): SolverInstance {
-  const { a1, a2, b, c, solution } = eq;
+  const { a1, a2, b, c, solution, orientation } = eq;
   const x = variableSymbol;
 
-  // eqColumnIndex is fixed at 3 for this whole instance (assembleRow3's "="
-  // position) - every later row keeps using assembleRow3, with the second
-  // term column permanently blank once the like terms are combined, since
-  // every row in one instance shares the same grid shape.
+  // eqColumnIndex is fixed for this whole instance based on orientation -
+  // 3 when the expression (a1x + a2x + b) is on the left (c sits alone on
+  // the right), or 1 when it's mirrored (c sits alone on the left). Every
+  // row keeps using this same oriented assembly, so the "=" always lands
+  // in the same column throughout the whole problem.
+  const eqColumnIndex = orientation === "expressionLeft" ? 3 : 1;
+
+  // Places the expression side's 3 term columns and the lone constant
+  // column according to orientation - the SAME semantic arguments
+  // (which term is which) regardless of which physical side they land
+  // on, so every row-building call below doesn't need its own
+  // orientation branching.
+  function assembleOriented(
+    exprCell1: string,
+    exprCell2: string,
+    exprCell3: string,
+    constantCell: string,
+    eqSymbol: string = "="
+  ): string[] {
+    return orientation === "expressionLeft"
+      ? [exprCell1, exprCell2, exprCell3, eqSymbol, constantCell]
+      : [constantCell, eqSymbol, exprCell1, exprCell2, exprCell3];
+  }
+
+  // The lone constant (c) is always the sole term on its own side, so it
+  // always renders naturally - never a forced "+" - regardless of which
+  // physical side it lands on.
   const initialRow: GridRow = {
-    cells: assembleRow3(
+    cells: assembleOriented(
       renderMultiplyTerm(a1, x),
       renderMultiplyTerm(a2, x, true),
       renderConstant(b, true),
-      renderConstant(c, true)
+      renderConstant(c)
     ),
   };
 
@@ -90,7 +108,7 @@ export function buildSolverInstance(
   const absA2 = Math.abs(a2);
 
   const combinedRow: GridRow = {
-    cells: assembleRow3(plainTerm(combinedA, x), BLANK, renderConstant(b, true), renderConstant(c, true)),
+    cells: assembleOriented(plainTerm(combinedA, x), BLANK, renderConstant(b, true), renderConstant(c)),
   };
 
   const combineCorrect = plainTerm(combinedA, x);
@@ -119,16 +137,16 @@ export function buildSolverInstance(
   const absB = Math.abs(b);
   const opSym = bPositive ? "-" : "+";
 
-  // Position 2 (b's own column) is a non-leading position everywhere else
-  // it appears in this equation, so its annotation needs the same gap a
-  // real forced term there would have. Position 4 (the sole right-side
-  // column) is leading/only-term-on-its-side, so it stays gap-free -
-  // matching the per-column rule established for the other skills,
-  // rather than a blanket "no gap" that would misalign with the real row.
-  const cancelDisplayCol2 = renderConstant(-b, true);
-  const cancelDisplayCol4 = renderConstant(-b, true, false);
+  // b's own column is a non-leading position everywhere else it appears
+  // in this equation, so its annotation needs the same gap a real forced
+  // term there would have. c's column is leading/only-term-on-its-side,
+  // so it stays gap-free - matching the per-column rule established for
+  // the other skills, rather than a blanket "no gap" that would
+  // misalign with the real row.
+  const cancelDisplayAtB = renderConstant(-b, true);
+  const cancelDisplayAtC = renderConstant(-b, true, false);
   const cancelRow: GridRow = {
-    cells: assembleRow3(BLANK, BLANK, cancelDisplayCol2, cancelDisplayCol4, ""),
+    cells: assembleOriented(BLANK, BLANK, cancelDisplayAtB, cancelDisplayAtC, ""),
   };
 
   const correctOpText = bPositive ? `Subtracting ${absB} from both sides` : `Adding ${absB} to both sides`;
@@ -166,7 +184,7 @@ export function buildSolverInstance(
   const needsDivide = combinedA !== 1;
 
   const reducedRow: GridRow = {
-    cells: assembleRow3(plainTerm(combinedA, x), BLANK, BLANK, renderConstant(newRhs)),
+    cells: assembleOriented(plainTerm(combinedA, x), BLANK, BLANK, renderConstant(newRhs)),
     ...(needsDivide ? {} : { highlight: "success" as const }),
   };
 
@@ -194,7 +212,7 @@ export function buildSolverInstance(
   const divSetup = `\\dfrac{${plainTerm(combinedA, x)}}{${combinedA}}`;
   const divRhs = `\\dfrac{${newRhs}}{${combinedA}}`;
   const divRow: GridRow = {
-    cells: assembleRow3(divSetup, BLANK, BLANK, divRhs),
+    cells: assembleOriented(divSetup, BLANK, BLANK, divRhs),
   };
 
   const step4Choices: Choice[] =
@@ -238,7 +256,7 @@ export function buildSolverInstance(
   // yet, so it isn't repeated a second time; compute_value fills it in
   // on this same line below.
   const coeffConfirmedRow: GridRow = {
-    cells: assembleRow3(x, BLANK, BLANK, BLANK),
+    cells: assembleOriented(x, BLANK, BLANK, BLANK),
   };
 
   const coeffOneDistractors = dedupNumeric("1", [
@@ -262,7 +280,7 @@ export function buildSolverInstance(
   // ---------- Step 6: compute the final value ----------
 
   const finalRow: GridRow = {
-    cells: assembleRow3(x, BLANK, BLANK, renderConstant(solution)),
+    cells: assembleOriented(x, BLANK, BLANK, renderConstant(solution)),
     highlight: "success",
   };
 
@@ -297,7 +315,13 @@ export function buildSolverInstance(
     steps: needsDivide
       ? [combine, goal, cancelConstant, divide, confirmCoefficientOne, computeValue]
       : [combine, goal, cancelConstant],
-    eqColumnIndex: 3,
+    eqColumnIndex,
+    // Always genuinely 5 cells regardless of orientation - the shared
+    // grid's default eqColumnIndex-based formula assumes eqColumnIndex=1
+    // always means a 4-cell row (true for the older 2-term-per-side
+    // skills), which undercounts this skill's 3-term expression side by
+    // one column and wraps the last cell onto its own line.
+    columnCount: 5,
     termAlign: "right",
   };
 }
