@@ -1,5 +1,5 @@
 import type { SolverInstance, SolverStep, Choice, GridRow } from "./types";
-import { assembleBothSides, randBool, randInt, renderConstant, renderMultiplyTerm } from "./isolateVariableCore";
+import { assembleBothSides, randBool, randInt, renderConstant, renderMultiplyTerm, SIGN_GAP } from "./isolateVariableCore";
 import { buildSolverInstance as buildVariablesBothSidesInstance } from "./variablesBothSides";
 
 // ---------- shared small helpers ----------
@@ -215,7 +215,7 @@ function buildCombineVarStep(coef1: number, coef2: number, x: string, sideLabel:
     combined,
     prompt: `Combine the like terms on the ${sideLabel} side. What is ${plainTerm(coef1, x)} ${op} ${abs2}${x}?`,
     choices,
-    explanation: `The terms combine to ${plainTerm(combined, x)}. The rest of the equation gets brought down unchanged.`,
+    explanation: `The terms combine to ${plainTerm(combined, x)}. The rest of the ${sideLabel} side of the equation gets brought down unchanged.`,
   };
 }
 
@@ -238,7 +238,7 @@ function buildCombineConstStep(b1: number, b2: number, sideLabel: string) {
     combined,
     prompt: `Combine the like terms on the ${sideLabel} side. What is ${b1} ${op} ${abs2}?`,
     choices,
-    explanation: `The constants combine to ${combined}. The rest of the equation gets brought down unchanged.`,
+    explanation: `The constants combine to ${combined}. The rest of the ${sideLabel} side of the equation gets brought down unchanged.`,
   };
 }
 
@@ -305,21 +305,21 @@ export function buildSolverInstance(
       case "PAREN_PLUS_VAR": {
         const nxNatural = renderMultiplyTerm(spec.n!, x);
         const kxForced = renderMultiplyTerm(spec.k!, x, true);
-        return [`${spec.m}(${nxNatural}`, `${renderConstant(spec.p!, true)}) ${kxForced}`];
+        return [`${spec.m}(${nxNatural}`, `${renderConstant(spec.p!, true)})${SIGN_GAP}${kxForced}`];
       }
       case "PAREN_PLUS_CONST": {
         const nxNatural = renderMultiplyTerm(spec.n!, x);
         const kForced = renderConstant(spec.k!, true);
-        return [`${spec.m}(${nxNatural}`, `${renderConstant(spec.p!, true)}) ${kForced}`];
+        return [`${spec.m}(${nxNatural}`, `${renderConstant(spec.p!, true)})${SIGN_GAP}${kForced}`];
       }
       case "COMBINE_VAR": {
         const a2Forced = renderMultiplyTerm(spec.a2!, x, true);
-        return [renderMultiplyTerm(spec.a1!, x), `${a2Forced} ${renderConstant(spec.finalConst, true)}`];
+        return [renderMultiplyTerm(spec.a1!, x), `${a2Forced}${SIGN_GAP}${renderConstant(spec.finalConst, true)}`];
       }
       case "COMBINE_CONST": {
         return [
           renderMultiplyTerm(spec.finalCoef, x),
-          `${renderConstant(spec.b1!, true)} ${renderConstant(spec.b2!, true)}`,
+          `${renderConstant(spec.b1!, true)}${SIGN_GAP}${renderConstant(spec.b2!, true)}`,
         ];
       }
     }
@@ -345,7 +345,7 @@ export function buildSolverInstance(
     steps.push({
       stepId: "distribute_left_first_term",
       rowUpdates: [
-        { slotId: "left_distributed", row: { cells: assembleBothSides(s1.resultCell, leftCell2, rightCell1, rightCell2) } },
+        { slotId: "distributed", row: { cells: assembleBothSides(s1.resultCell, leftCell2, rightCell1, rightCell2) } },
       ],
       prompt: s1.prompt,
       choices: s1.choices,
@@ -358,12 +358,12 @@ export function buildSolverInstance(
       leftSpec.shape === "PAREN"
         ? s2.mpSigned
         : leftSpec.shape === "PAREN_PLUS_VAR"
-        ? `${s2.mpSigned} ${renderMultiplyTerm(leftSpec.k!, x, true)}`
-        : `${s2.mpSigned} ${renderConstant(leftSpec.k!, true)}`;
+        ? `${s2.mpSigned}${SIGN_GAP}${renderMultiplyTerm(leftSpec.k!, x, true)}`
+        : `${s2.mpSigned}${SIGN_GAP}${renderConstant(leftSpec.k!, true)}`;
     steps.push({
       stepId: "distribute_left_second_term",
       rowUpdates: [
-        { slotId: "left_distributed", row: { cells: assembleBothSides(leftCell1, newLeftCell2, rightCell1, rightCell2) } },
+        { slotId: "distributed", row: { cells: assembleBothSides(leftCell1, newLeftCell2, rightCell1, rightCell2) } },
       ],
       prompt: s2.prompt,
       choices: s2.choices,
@@ -378,7 +378,7 @@ export function buildSolverInstance(
     steps.push({
       stepId: "distribute_right_first_term",
       rowUpdates: [
-        { slotId: "right_distributed", row: { cells: assembleBothSides(leftCell1, leftCell2, s1.resultCell, rightCell2) } },
+        { slotId: "distributed", row: { cells: assembleBothSides(leftCell1, leftCell2, s1.resultCell, rightCell2) } },
       ],
       prompt: s1.prompt,
       choices: s1.choices,
@@ -391,12 +391,12 @@ export function buildSolverInstance(
       rightSpec.shape === "PAREN"
         ? s2.mpSigned
         : rightSpec.shape === "PAREN_PLUS_VAR"
-        ? `${s2.mpSigned} ${renderMultiplyTerm(rightSpec.k!, x, true)}`
-        : `${s2.mpSigned} ${renderConstant(rightSpec.k!, true)}`;
+        ? `${s2.mpSigned}${SIGN_GAP}${renderMultiplyTerm(rightSpec.k!, x, true)}`
+        : `${s2.mpSigned}${SIGN_GAP}${renderConstant(rightSpec.k!, true)}`;
     steps.push({
       stepId: "distribute_right_second_term",
       rowUpdates: [
-        { slotId: "right_distributed", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, newRightCell2) } },
+        { slotId: "distributed", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, newRightCell2) } },
       ],
       prompt: s2.prompt,
       choices: s2.choices,
@@ -413,7 +413,7 @@ export function buildSolverInstance(
       leftCell2 = renderConstant(leftSpec.finalConst, true);
       steps.push({
         stepId: "combine_left",
-        rowUpdates: [{ slotId: "left_combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
+        rowUpdates: [{ slotId: "combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
         prompt: c.prompt,
         choices: c.choices,
         explanationOnCorrect: c.explanation,
@@ -423,7 +423,7 @@ export function buildSolverInstance(
       leftCell2 = renderConstant(c.combined, true);
       steps.push({
         stepId: "combine_left",
-        rowUpdates: [{ slotId: "left_combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
+        rowUpdates: [{ slotId: "combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
         prompt: c.prompt,
         choices: c.choices,
         explanationOnCorrect: c.explanation,
@@ -435,7 +435,7 @@ export function buildSolverInstance(
       leftCell2 = renderConstant(leftSpec.m! * leftSpec.p!, true);
       steps.push({
         stepId: "combine_left",
-        rowUpdates: [{ slotId: "left_combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
+        rowUpdates: [{ slotId: "combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
         prompt: c.prompt,
         choices: c.choices,
         explanationOnCorrect: c.explanation,
@@ -446,7 +446,7 @@ export function buildSolverInstance(
       leftCell2 = renderConstant(c.combined, true);
       steps.push({
         stepId: "combine_left",
-        rowUpdates: [{ slotId: "left_combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
+        rowUpdates: [{ slotId: "combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
         prompt: c.prompt,
         choices: c.choices,
         explanationOnCorrect: c.explanation,
@@ -462,7 +462,7 @@ export function buildSolverInstance(
       rightCell2 = renderConstant(rightSpec.finalConst, true);
       steps.push({
         stepId: "combine_right",
-        rowUpdates: [{ slotId: "right_combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
+        rowUpdates: [{ slotId: "combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
         prompt: c.prompt,
         choices: c.choices,
         explanationOnCorrect: c.explanation,
@@ -472,7 +472,7 @@ export function buildSolverInstance(
       rightCell2 = renderConstant(c.combined, true);
       steps.push({
         stepId: "combine_right",
-        rowUpdates: [{ slotId: "right_combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
+        rowUpdates: [{ slotId: "combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
         prompt: c.prompt,
         choices: c.choices,
         explanationOnCorrect: c.explanation,
@@ -484,7 +484,7 @@ export function buildSolverInstance(
       rightCell2 = renderConstant(rightSpec.m! * rightSpec.p!, true);
       steps.push({
         stepId: "combine_right",
-        rowUpdates: [{ slotId: "right_combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
+        rowUpdates: [{ slotId: "combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
         prompt: c.prompt,
         choices: c.choices,
         explanationOnCorrect: c.explanation,
@@ -495,7 +495,7 @@ export function buildSolverInstance(
       rightCell2 = renderConstant(c.combined, true);
       steps.push({
         stepId: "combine_right",
-        rowUpdates: [{ slotId: "right_combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
+        rowUpdates: [{ slotId: "combined", row: { cells: assembleBothSides(leftCell1, leftCell2, rightCell1, rightCell2) } }],
         prompt: c.prompt,
         choices: c.choices,
         explanationOnCorrect: c.explanation,
@@ -518,6 +518,9 @@ export function buildSolverInstance(
     steps,
     eqColumnIndex: 2,
     columnCount: 5,
+    // ~60/40 split - a parenthetical group on the left can otherwise get
+    // cut off, same reasoning as the no-parentheses skill.
+    panelRatio: "3fr 2fr",
     termAlign: "right",
   };
 }

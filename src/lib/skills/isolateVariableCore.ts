@@ -23,14 +23,12 @@ export function randMultiplyCoefficient(): number {
 
 export const BLANK = "\\phantom{0}";
 
-// The grid's own column gap is a fixed 14px, at the equation area's fixed
-// 21px font-size (both confirmed constant across every skill). This is
-// the KaTeX equivalent of that same 14px, so the space AFTER a forced
-// sign visually matches the space BEFORE it (from the grid gap) exactly,
-// instead of the much smaller "\," thin-space, which - at 0.167em, ~3-4px
-// - made a sign look glued to the term after it rather than sitting
-// centered between both neighbors like a normal +/- should.
-export const SIGN_GAP = "\\hspace{0.6667em}";
+// A direct 10px request, at the equation area's font-size (now 20px) -
+// 10/20 = 0.5em exactly. The grid's own CSS column gap (StepSolver.tsx,
+// all 6 fontSize + 5 columnGap occurrences) is set to this same 10px so
+// both spacing sources stay matched, same as every previous step in this
+// progression (\, -> \: -> \; -> 6mu -> now a direct pixel target).
+export const SIGN_GAP = "\\hspace{0.5em}";
 
 export function renderConstant(value: number, forceSign: boolean = false, addGap: boolean = true): string {
   // Leading position (forceSign=false): sign always hugs the value

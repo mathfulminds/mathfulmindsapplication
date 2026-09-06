@@ -17,8 +17,8 @@ export default function TwoStepEquationsPage() {
         Solving two-step equations
       </h1>
       <p style={{ color: "var(--ink-soft)", fontSize: 15, marginBottom: 32 }}>
-        Answer each step correctly to reveal the next line. Every problem is
-        randomly generated, so you can practice as many as you like.
+        The goal is to get the variable alone. Our first step is to add or
+        subtract. Our second step is to multiply or divide.
       </p>
       <StepSolver generate={generateTwoStepInstance} skillName="Two-step equations" />
     </div>

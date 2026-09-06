@@ -15,6 +15,21 @@ import {
   signedWord,
 } from "./isolateVariableCore";
 
+function dedupNumeric(
+  correctText: string,
+  candidates: { text: string; tag: string }[]
+): { text: string; tag: string }[] {
+  const seen = new Set([correctText]);
+  const out: { text: string; tag: string }[] = [];
+  for (const c of candidates) {
+    if (out.length === 2) break;
+    if (seen.has(c.text)) continue;
+    seen.add(c.text);
+    out.push(c);
+  }
+  return out;
+}
+
 interface EquationInstance {
   a: number;
   b: number;
@@ -92,6 +107,9 @@ export function buildSolverInstance(
   let stepBPrompt: string;
   let stepBChoices: Choice[];
   let stepBExplanation: string;
+  let coeffConfirmPrompt: string;
+  let coeffConfirmExplanation: string;
+  let coeffConfirmDistractorCandidates: { text: string; tag: string }[];
 
   if (form === "multiply") {
     const divSetup = `\\dfrac{${renderMultiplyTerm(a, variableSymbol)}}{${a}}`;
@@ -134,6 +152,13 @@ export function buildSolverInstance(
             },
           ];
     stepBExplanation = `Undo multiplication by dividing both sides by ${a}.`;
+    coeffConfirmPrompt = `What is ${a} \u00f7 ${a}?`;
+    coeffConfirmExplanation = `The coefficient ${a} divided by itself is 1, so the variable is isolated.`;
+    coeffConfirmDistractorCandidates = [
+      { text: `${a}`, tag: "forgot_to_apply_operation" },
+      { text: "0", tag: "confuses_division_with_subtraction_pattern" },
+      { text: `${-a}`, tag: "sign_error" },
+    ];
   } else {
     const exprIsLeftOfEquals = orientation === "expressionLeft";
     const constantIsLeftOfEquals = orientation === "expressionRight";
@@ -177,49 +202,114 @@ export function buildSolverInstance(
             },
           ];
     stepBExplanation = `Undo division by multiplying both sides by ${a}.`;
+    coeffConfirmPrompt = `What is ${a} multiplied by 1/${a}?`;
+    coeffConfirmExplanation = `${a} times its own reciprocal is 1, so the variable is isolated.`;
+    coeffConfirmDistractorCandidates = [
+      { text: `${a}`, tag: "forgot_to_apply_operation" },
+      { text: "0", tag: "confuses_division_with_subtraction_pattern" },
+      { text: `${-a}`, tag: "sign_error" },
+    ];
   }
 
+  // ---------- Confirm the coefficient becomes 1 ----------
+  // A NEW line, not a continuation of the divide/multiply-setup line
+  // above - so that setup (e.g. "ax/a = newRhs/a") stays visible
+  // permanently, and this becomes a new line below it. The constant's
+  // own position stays blank here - it hasn't been computed yet, so it
+  // isn't repeated a second time; compute_value fills it in below.
   const finalExpr1 = bIsSecond ? variableSymbol : BLANK;
   const finalExpr2 = bIsSecond ? BLANK : variableSymbol;
+  const coeffConfirmedRow: GridRow = {
+    cells: assembleRow(finalExpr1, finalExpr2, BLANK, orientation),
+  };
+  const coeffConfirmDistractors = dedupNumeric("1", coeffConfirmDistractorCandidates);
+  const confirmCoefficientOne: SolverStep = {
+    stepId: "confirm_coefficient_one",
+    rowUpdates: [{ slotId: "coefficient_confirmed", row: coeffConfirmedRow }],
+    prompt: coeffConfirmPrompt,
+    choices: shuffle([
+      { text: "1", isCorrect: true, misconceptionTag: null },
+      { text: coeffConfirmDistractors[0].text, isCorrect: false, misconceptionTag: coeffConfirmDistractors[0].tag },
+      { text: coeffConfirmDistractors[1].text, isCorrect: false, misconceptionTag: coeffConfirmDistractors[1].tag },
+    ]),
+    explanationOnCorrect: coeffConfirmExplanation,
+  };
+
   const finalRow: GridRow = {
     cells: assembleRow(finalExpr1, finalExpr2, renderConstant(solution), orientation),
     highlight: "success",
   };
 
   const constantIsPositive = b >= 0;
+  const absB = Math.abs(b);
+  const constOpSym = constantIsPositive ? "-" : "+";
   const stepAChoices: Choice[] = [
     {
       text: constantIsPositive
-        ? `Subtracting ${Math.abs(b)} from both sides`
-        : `Adding ${Math.abs(b)} to both sides`,
+        ? `Subtracting ${absB} from both sides`
+        : `Adding ${absB} to both sides`,
       isCorrect: true,
       misconceptionTag: null,
     },
     {
-      text: `${constantIsPositive ? "Dividing" : "Multiplying"} both sides by ${Math.abs(b)}`,
+      text: `${constantIsPositive ? "Dividing" : "Multiplying"} both sides by ${absB}`,
       isCorrect: false,
       misconceptionTag: "confuses_additive_and_multiplicative_inverse",
     },
     {
       text: constantIsPositive
-        ? `Adding ${Math.abs(b)} to both sides`
-        : `Subtracting ${Math.abs(b)} from both sides`,
+        ? `Adding ${absB} to both sides`
+        : `Subtracting ${absB} from both sides`,
       isCorrect: false,
       misconceptionTag: "flipped_the_operation",
     },
   ];
 
-  const stepA: SolverStep = {
-    stepId: "eliminate_constant",
-    rowUpdates: [
-      { slotId: "cancel_annotation", row: cancelRow },
-      { slotId: "simplified", row: combinedRow },
-    ],
-    prompt: `What undoes the ${signedWord(b)} on the side with the variable?`,
+  // Split into three granular steps (goal -> confirm cancellation ->
+  // confirm the new value), matching the pattern already established in
+  // variablesBothSides.ts, instead of jumping straight from "choose the
+  // operation" to the fully-simplified row in one step.
+  const goalConstant: SolverStep = {
+    stepId: "goal_eliminate_constant",
+    rowUpdates: [{ slotId: "cancel_annotation", row: cancelRow }],
+    prompt: `What undoes ${signedWord(b)} on the side with the variable?`,
     choices: shuffle(stepAChoices),
     explanationOnCorrect: constantIsPositive
-      ? `Undo addition by subtracting ${Math.abs(b)} from both sides.`
-      : `Undo subtraction by adding ${Math.abs(b)} to both sides.`,
+      ? `Undo addition by subtracting ${absB} from both sides.`
+      : `Undo subtraction by adding ${absB} to both sides.`,
+  };
+
+  const cancelConstDistractors = dedupNumeric("0", [
+    { text: `${2 * absB}`, tag: "flipped_the_operation" },
+    { text: `${absB}`, tag: "forgot_to_apply_operation" },
+  ]);
+  const cancelConstant: SolverStep = {
+    stepId: "cancel_constant",
+    rowUpdates: [],
+    prompt: `What is ${absB} ${constOpSym} ${absB}?`,
+    choices: shuffle([
+      { text: "0", isCorrect: true, misconceptionTag: null },
+      { text: cancelConstDistractors[0].text, isCorrect: false, misconceptionTag: cancelConstDistractors[0].tag },
+      { text: cancelConstDistractors[1].text, isCorrect: false, misconceptionTag: cancelConstDistractors[1].tag },
+    ]),
+    explanationOnCorrect: "The constants are opposites resulting in 0.",
+  };
+
+  const combineConstDistractors = dedupNumeric(`${newRhs}`, [
+    { text: `${constOpSym === "-" ? rhs + absB : rhs - absB}`, tag: "flipped_the_operation" },
+    { text: `${-newRhs}`, tag: "sign_error" },
+    { text: `${newRhs + 1}`, tag: "arithmetic_slip" },
+  ]);
+  const combineConstant: SolverStep = {
+    stepId: "combine_constant",
+    rowUpdates: [{ slotId: "simplified", row: combinedRow }],
+    prompt: `What is ${rhs} ${constOpSym} ${absB}?`,
+    choices: shuffle([
+      { text: `${newRhs}`, isCorrect: true, misconceptionTag: null },
+      { text: combineConstDistractors[0].text, isCorrect: false, misconceptionTag: combineConstDistractors[0].tag },
+      { text: combineConstDistractors[1].text, isCorrect: false, misconceptionTag: combineConstDistractors[1].tag },
+    ]),
+    explanationOnCorrect: `The terms combine to ${newRhs}. The rest of the equation gets brought down unchanged.`,
   };
 
   const stepB: SolverStep = {
@@ -256,7 +346,7 @@ export function buildSolverInstance(
 
   const stepC: SolverStep = {
     stepId: "compute_value",
-    rowUpdates: [{ slotId: "final", row: finalRow }],
+    rowUpdates: [{ slotId: "coefficient_confirmed", row: finalRow }],
     prompt: `${newRhs} ${opSymbol} ${a} = ? What is the value of ${variableSymbol}?`,
     choices: shuffle(stepCChoices),
     explanationOnCorrect: sameSign
@@ -266,7 +356,7 @@ export function buildSolverInstance(
 
   return {
     initialRow,
-    steps: [stepA, stepB, stepC],
+    steps: [goalConstant, cancelConstant, combineConstant, stepB, confirmCoefficientOne, stepC],
     eqColumnIndex: eqColumnIndexFor(orientation),
     termAlign: "right",
   };

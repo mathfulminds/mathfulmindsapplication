@@ -366,7 +366,7 @@ function ColumnWidthMeasurer({ mathStrings, onMeasured }: { mathStrings: string[
   return (
     <div ref={containerRef} style={{ position: "fixed", top: -9999, left: -9999, visibility: "hidden", pointerEvents: "none" }}>
       {mathStrings.map((s, i) => (
-        <div key={i} style={{ whiteSpace: "nowrap", fontSize: 21, display: "inline-block" }}>
+        <div key={i} style={{ whiteSpace: "nowrap", fontSize: 20, display: "inline-block" }}>
           <InlineMath math={s} />
         </div>
       ))}
@@ -533,7 +533,7 @@ function DistributeDiagram({
           )}
         </svg>
       )}
-      <div style={{ display: "flex", alignItems: "baseline", fontSize: 21 }}>
+      <div style={{ display: "flex", alignItems: "baseline", fontSize: 20 }}>
         {prefix && (
           <span style={{ marginRight: 4, color: prefixColor }}>
             <InlineMath math={prefix} />
@@ -774,7 +774,7 @@ function EquationGrid({
               <div
                 key={key}
                 data-row-slot={slotId}
-                style={{ display: "grid", gridTemplateColumns: `repeat(${cells.length}, auto)`, columnGap: 14, alignItems: "center" }}
+                style={{ display: "grid", gridTemplateColumns: `repeat(${cells.length}, auto)`, columnGap: 10, alignItems: "center" }}
               >
                 {cells.map((cellValue, colIndex) =>
                   colIndex === eqColumnIndex ? (
@@ -868,10 +868,10 @@ function EquationGrid({
               style={{
                 display: "grid",
                 gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex, columnCount)}, auto)`,
-                columnGap: 14,
+                columnGap: 10,
                 rowGap: 20,
                 alignItems: "center",
-                fontSize: 21,
+                fontSize: 20,
                 flexShrink: 0,
               }}
             >
@@ -881,10 +881,10 @@ function EquationGrid({
               style={{
                 display: "grid",
                 gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex, columnCount)}, auto)`,
-                columnGap: 14,
+                columnGap: 10,
                 rowGap: 20,
                 alignItems: "center",
-                fontSize: 21,
+                fontSize: 20,
                 flexShrink: 0,
               }}
             >
@@ -896,10 +896,10 @@ function EquationGrid({
               style={{
                 display: "grid",
                 gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex, columnCount)}, auto)`,
-                columnGap: 14,
+                columnGap: 10,
                 rowGap: 20,
                 alignItems: "center",
-                fontSize: 21,
+                fontSize: 20,
                 marginTop: 20,
               }}
             >
@@ -919,10 +919,10 @@ function EquationGrid({
           display: "grid",
           gridTemplateColumns: `repeat(${totalGridColumns(eqColumnIndex, columnCount)}, auto)`,
           width: "fit-content",
-          columnGap: 14,
+          columnGap: 10,
           rowGap: 20,
           alignItems: "center",
-          fontSize: 21,
+          fontSize: 20,
           position: "relative",
         }}
       >
