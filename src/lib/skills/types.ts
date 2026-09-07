@@ -20,6 +20,15 @@ export interface GridRow {
   // no matter how long the surrounding terms are, or how many there
   // are). The equals-sign position is always cells.length - 2.
   cells: readonly string[];
+  // Pulls the NEXT row this many px closer (negative value shrinks the
+  // gap). The grid's own rowGap is 20px, but each cell also has its own
+  // line-height creating extra space above/below its content - so fully
+  // closing the gap takes more than just -20 (canceling rowGap alone).
+  // Used when a later row needs to visually attach to an earlier one,
+  // like a division bar growing directly out of the numerator already
+  // shown on the row above, rather than floating with the same spacing
+  // every other row uses.
+  marginBottom?: number;
   // "success" = the final correct-answer highlight used everywhere.
   // "phase-blue"/"phase-green" = a sustained color across a whole phase
   // of a multi-phase skill (e.g. the elimination/scaling phase vs. the

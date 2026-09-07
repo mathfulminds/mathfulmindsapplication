@@ -112,6 +112,14 @@ export function buildSolverInstance(
   let coeffConfirmDistractorCandidates: { text: string; tag: string }[];
 
   if (form === "multiply") {
+    // Real, visible numerator - this row EVOLVES the same "simplified"
+    // slot combine_constant already showed (see below), replacing "14x
+    // = 42" with "14x/14 = 42/14" in place rather than sitting below it
+    // as a second line. Since it's the same slot, there's no duplicate
+    // ever visible at once, so unlike oneStepEquations.ts's eliminate_
+    // coefficient - which IS the very first step, with the permanent
+    // initial row still on screen above it - there's nothing here that
+    // needs a phantom-numerator trick to avoid.
     const divSetup = `\\dfrac{${renderMultiplyTerm(a, variableSymbol)}}{${a}}`;
     const divRhs = `\\dfrac{${newRhs}}{${a}}`;
     const setupExpr1 = bIsSecond ? divSetup : BLANK;
@@ -202,8 +210,8 @@ export function buildSolverInstance(
             },
           ];
     stepBExplanation = `Undo division by multiplying both sides by ${a}.`;
-    coeffConfirmPrompt = `What is ${a} multiplied by 1/${a}?`;
-    coeffConfirmExplanation = `${a} times its own reciprocal is 1, so the variable is isolated.`;
+    coeffConfirmPrompt = `What is ${a} multiplied by $\\dfrac{1}{${a}}$?`;
+    coeffConfirmExplanation = `${a} and $\\dfrac{1}{${a}}$ are reciprocals, so ${a} \u00d7 $\\dfrac{1}{${a}}$ equals 1, so the variable is isolated.`;
     coeffConfirmDistractorCandidates = [
       { text: `${a}`, tag: "forgot_to_apply_operation" },
       { text: "0", tag: "confuses_division_with_subtraction_pattern" },
@@ -314,6 +322,12 @@ export function buildSolverInstance(
 
   const stepB: SolverStep = {
     stepId: "eliminate_coefficient",
+    // Both forms just update "simplified" in place - the multiply form's
+    // real, visible-numerator fraction replaces "14x = 42" with "14x/14
+    // = 42/14" on the same line; the divide form's parenthetical
+    // multiplier is added onto that same line too. Neither needs a
+    // second slot or marginBottom, since there's only ever one line
+    // visible here at a time, not two.
     rowUpdates: [{ slotId: "simplified", row: stepBRow }],
     prompt: stepBPrompt,
     choices: shuffle(stepBChoices),

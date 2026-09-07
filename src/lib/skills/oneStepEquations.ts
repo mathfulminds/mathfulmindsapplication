@@ -16,6 +16,21 @@ import {
   SIGN_GAP,
 } from "./isolateVariableCore";
 
+function dedupNumeric(
+  correctText: string,
+  candidates: { text: string; tag: string }[]
+): { text: string; tag: string }[] {
+  const seen = new Set([correctText]);
+  const out: { text: string; tag: string }[] = [];
+  for (const c of candidates) {
+    if (out.length === 2) break;
+    if (seen.has(c.text)) continue;
+    seen.add(c.text);
+    out.push(c);
+  }
+  return out;
+}
+
 type Variant = "additive" | "multiplicative";
 
 interface OneStepInstance {
@@ -125,13 +140,36 @@ export function buildOneStepInstance(
     ];
 
     const stepOne: SolverStep = {
-      stepId: "eliminate_constant",
+      stepId: "goal_eliminate_constant",
       rowUpdates: [{ slotId: "cancel_annotation", row: cancelRow }],
       prompt: `What undoes the ${signedWord(b)} on the side with the variable?`,
       choices: shuffle(stepOneChoices),
       explanationOnCorrect: constantIsPositive
         ? `Undo addition by subtracting ${Math.abs(b)} from both sides.`
         : `Undo subtraction by adding ${Math.abs(b)} to both sides.`,
+    };
+
+    // ---------- Confirm the constant cancels to 0 ----------
+    // Matches the same granular split already used in twoStepEquations.ts
+    // - choose the operation, confirm it cancels to 0, THEN compute the
+    // final value - instead of jumping straight from choosing the
+    // operation to the answer.
+    const absB = Math.abs(b);
+    const cancelOpSym = constantIsPositive ? "-" : "+";
+    const cancelConstDistractors = dedupNumeric("0", [
+      { text: `${2 * absB}`, tag: "flipped_the_operation" },
+      { text: `${absB}`, tag: "forgot_to_apply_operation" },
+    ]);
+    const cancelConstant: SolverStep = {
+      stepId: "cancel_constant",
+      rowUpdates: [],
+      prompt: `What is ${absB} ${cancelOpSym} ${absB}?`,
+      choices: shuffle([
+        { text: "0", isCorrect: true, misconceptionTag: null },
+        { text: cancelConstDistractors[0].text, isCorrect: false, misconceptionTag: cancelConstDistractors[0].tag },
+        { text: cancelConstDistractors[1].text, isCorrect: false, misconceptionTag: cancelConstDistractors[1].tag },
+      ]),
+      explanationOnCorrect: "The constants are opposites resulting in 0.",
     };
 
     // Second step: explicitly test the arithmetic, same as the
@@ -168,7 +206,7 @@ export function buildOneStepInstance(
 
     return {
       initialRow,
-      steps: [stepOne, stepTwo],
+      steps: [stepOne, cancelConstant, stepTwo],
       eqColumnIndex: eqColumnIndexFor(orientation),
       termAlign: "right",
     };
@@ -189,9 +227,18 @@ export function buildOneStepInstance(
   let prompt: string;
   let choices: Choice[];
   let explanationOnCorrect: string;
+  let coeffConfirmPrompt: string;
+  let coeffConfirmExplanation: string;
+  let coeffConfirmDistractorCandidates: { text: string; tag: string }[];
 
   if (form === "multiply") {
-    const divSetup = `\\dfrac{${renderMultiplyTerm(a, variableSymbol)}}{${a}}`;
+    // Real, visible numerator - this replaces "13x = -143" in place
+    // (see stepOne below, which targets "__initial__" directly) rather
+    // than sitting below it as a second line. Same reasoning as the
+    // divide form just below: since it's the same slot, there's no
+    // duplicate ever visible at once, so there's nothing that needs a
+    // phantom-numerator trick or a margin adjustment to fix.
+    const divSetup = `\\dfrac{${variableTermNatural}}{${a}}`;
     const divRhs = `\\dfrac{${rhs}}{${a}}`;
     stepRow = { cells: assembleRow(divSetup, BLANK, divRhs, orientation) };
     prompt = `What undoes multiplying ${variableSymbol} by ${a}?`;
@@ -209,6 +256,13 @@ export function buildOneStepInstance(
       },
     ];
     explanationOnCorrect = `Undo multiplication by dividing both sides by ${a}.`;
+    coeffConfirmPrompt = `What is ${a} \u00f7 ${a}?`;
+    coeffConfirmExplanation = `The coefficient ${a} divided by itself is 1, so the variable is isolated.`;
+    coeffConfirmDistractorCandidates = [
+      { text: `${a}`, tag: "forgot_to_apply_operation" },
+      { text: "0", tag: "confuses_division_with_subtraction_pattern" },
+      { text: `${-a}`, tag: "sign_error" },
+    ];
   } else {
     const exprIsLeftOfEquals = orientation === "expressionLeft";
     const constantIsLeftOfEquals = orientation === "expressionRight";
@@ -234,6 +288,13 @@ export function buildOneStepInstance(
       },
     ];
     explanationOnCorrect = `Undo division by multiplying both sides by ${a}.`;
+    coeffConfirmPrompt = `What is ${a} multiplied by $\\dfrac{1}{${a}}$?`;
+    coeffConfirmExplanation = `${a} and $\\dfrac{1}{${a}}$ are reciprocals, so ${a} \u00d7 $\\dfrac{1}{${a}}$ equals 1, so the variable is isolated.`;
+    coeffConfirmDistractorCandidates = [
+      { text: `${a}`, tag: "forgot_to_apply_operation" },
+      { text: "0", tag: "confuses_division_with_subtraction_pattern" },
+      { text: `${-a}`, tag: "sign_error" },
+    ];
   }
 
   const opSymbol = form === "multiply" ? "\u00f7" : "\u00d7";
@@ -272,15 +333,41 @@ export function buildOneStepInstance(
 
   const stepOne: SolverStep = {
     stepId: "eliminate_coefficient",
-    rowUpdates: [{ slotId: "simplified", row: stepRow }],
+    // Both forms just replace "__initial__" in place - the multiply
+    // form's real, visible-numerator fraction replaces "13x = -143"
+    // with "13x/13 = -143/13" on the same line; the divide form's
+    // parenthetical multiplier is added onto that same line too.
+    // Neither needs a second slot or marginBottom, since there's only
+    // ever one line visible here at a time, not two.
+    rowUpdates: [{ slotId: "__initial__", row: stepRow }],
     prompt,
     choices: shuffle(choices),
     explanationOnCorrect,
   };
 
+  // ---------- Confirm the coefficient becomes 1 ----------
+  // A NEW line, not a continuation of the divide/multiply-setup line
+  // above - so that setup stays visible permanently, and this becomes a
+  // new line below it.
+  const coeffConfirmedRow: GridRow = {
+    cells: assembleRow(variableSymbol, BLANK, BLANK, orientation),
+  };
+  const coeffConfirmDistractors = dedupNumeric("1", coeffConfirmDistractorCandidates);
+  const confirmCoefficientOne: SolverStep = {
+    stepId: "confirm_coefficient_one",
+    rowUpdates: [{ slotId: "coefficient_confirmed", row: coeffConfirmedRow }],
+    prompt: coeffConfirmPrompt,
+    choices: shuffle([
+      { text: "1", isCorrect: true, misconceptionTag: null },
+      { text: coeffConfirmDistractors[0].text, isCorrect: false, misconceptionTag: coeffConfirmDistractors[0].tag },
+      { text: coeffConfirmDistractors[1].text, isCorrect: false, misconceptionTag: coeffConfirmDistractors[1].tag },
+    ]),
+    explanationOnCorrect: coeffConfirmExplanation,
+  };
+
   const stepTwo: SolverStep = {
     stepId: "compute_value",
-    rowUpdates: [{ slotId: "final", row: finalRow }],
+    rowUpdates: [{ slotId: "coefficient_confirmed", row: finalRow }],
     prompt: `${rhs} ${opSymbol} ${a} = ? What is the value of ${variableSymbol}?`,
     choices: shuffle(finalChoices),
     explanationOnCorrect: sameSign
@@ -290,7 +377,7 @@ export function buildOneStepInstance(
 
   return {
     initialRow,
-    steps: [stepOne, stepTwo],
+    steps: [stepOne, confirmCoefficientOne, stepTwo],
     eqColumnIndex: eqColumnIndexFor(orientation),
     termAlign: "right",
   };

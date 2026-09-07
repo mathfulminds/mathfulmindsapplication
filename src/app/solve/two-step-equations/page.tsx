@@ -17,8 +17,8 @@ export default function TwoStepEquationsPage() {
         Solving two-step equations
       </h1>
       <p style={{ color: "var(--ink-soft)", fontSize: 15, marginBottom: 32 }}>
-        The goal is to get the variable alone. Our first step is to add or
-        subtract. Our second step is to multiply or divide.
+        The goal is to get the variable alone by adding, subtracting,
+        multiplying, or dividing.
       </p>
       <StepSolver generate={generateTwoStepInstance} skillName="Two-step equations" />
     </div>

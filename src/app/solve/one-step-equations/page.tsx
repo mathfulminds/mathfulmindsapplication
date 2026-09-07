@@ -17,8 +17,8 @@ export default function OneStepEquationsPage() {
         Solving one-step equations
       </h1>
       <p style={{ color: "var(--ink-soft)", fontSize: 15, marginBottom: 32 }}>
-        Answer the step correctly to reveal the answer. Every problem is
-        randomly generated, so you can practice as many as you like.
+        The goal is to get the variable alone by adding, subtracting,
+        multiplying, or dividing.
       </p>
       <StepSolver generate={generateOneStepInstance} skillName="One-step equations" />
     </div>

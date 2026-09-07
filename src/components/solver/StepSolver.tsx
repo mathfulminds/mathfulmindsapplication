@@ -812,7 +812,7 @@ function EquationGrid({
       // Defaults to "__initial__" (row 0) for skills that never set
       // targetSlotId, preserving existing behavior exactly.
       const singleAnnotation = distributeAnnotation?.targetSlotId === slotId ? distributeAnnotation : undefined;
-      return renderCellsOrArrow(row.cells, `${rowIndex}`, color, singleAnnotation, slotId);
+      return renderCellsOrArrow(row.cells, `${rowIndex}`, color, singleAnnotation, slotId, row.marginBottom);
     });
   }
 
