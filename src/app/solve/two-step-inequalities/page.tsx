@@ -17,9 +17,9 @@ export default function TwoStepInequalitiesPage() {
         Solving two-step inequalities
       </h1>
       <p style={{ color: "var(--ink-soft)", fontSize: 15, marginBottom: 32 }}>
-        Answer each step correctly to reveal the next line, including whether
-        the inequality sign flips. Every problem is randomly generated, so
-        you can practice as many as you like.
+        The goal is to get the variable alone and on the left side. First,
+        you will add or subtract. Then you will multiply or divide. You may
+        have to flip the sign during this process as well.
       </p>
       <StepSolver generate={generateTwoStepInequalityInstance} skillName="Two-step inequalities" />
     </div>

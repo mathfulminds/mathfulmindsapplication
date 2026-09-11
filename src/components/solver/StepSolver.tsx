@@ -233,6 +233,171 @@ function renderTextWithEmbeddedNumbers(text: string): ReactNode {
 
 const STACKEDFRACTION_PREFIX = "STACKEDFRACTION:";
 const STACK_SEPARATOR = "\u0005";
+const MARKEDTERM_PREFIX = "MARKEDTERM:";
+const MARKEDFRACTION_PREFIX = "MARKEDFRACTION:";
+const MARKEDPARENFRACTION_PREFIX = "MARKEDPARENFRACTION:";
+const COEF_VAR_SEPARATOR = "\u0006";
+
+// Two crossing diagonal lines over whatever's inside - used to show a
+// term or a fraction's numerator/denominator has been canceled out,
+// matching the handwritten convention of striking through a canceled
+// value rather than just showing an annotation below it.
+function XMark({ children, size = "normal" }: { children: ReactNode; size?: "normal" | "large" }) {
+  // "large" extends the lines further beyond the content's own edges and
+  // thickens them slightly - used for the coefficient-cancellation marks
+  // specifically, which wrap smaller content (just "-11" alone) than the
+  // constant-cancellation marks (a whole term like "+17"), so they read
+  // as proportionally small without a bit more reach.
+  const inset = size === "large" ? -3 : 2;
+  const thickness = size === "large" ? 2.5 : 2;
+  return (
+    <span style={{ position: "relative", display: "inline-block" }}>
+      {children}
+      <span style={{ position: "absolute", inset: 0, pointerEvents: "none" }} aria-hidden="true">
+        <span
+          style={{
+            position: "absolute",
+            left: inset,
+            right: inset,
+            top: "50%",
+            height: thickness,
+            background: "var(--coral)",
+            transform: "translateY(-50%) rotate(-20deg)",
+          }}
+        />
+        <span
+          style={{
+            position: "absolute",
+            left: inset,
+            right: inset,
+            top: "50%",
+            height: thickness,
+            background: "var(--coral)",
+            transform: "translateY(-50%) rotate(20deg)",
+          }}
+        />
+      </span>
+    </span>
+  );
+}
+
+// Same manual fraction-bar layout as renderStackedFraction, but for the
+// coefficient-cancellation step: the numerator is built from TWO
+// separate pieces (coefficient, variable) instead of one continuous
+// string, specifically so the x-mark can wrap just the coefficient
+// without ever touching the variable next to it. The denominator gets
+// its own x-mark too, since that's the same coefficient value doing
+// the dividing.
+function renderMarkedFraction(content: string, color: string): ReactNode {
+  const sepIdx = content.indexOf(STACK_SEPARATOR);
+  if (sepIdx === -1) return renderTextWithEmbeddedNumbers(content);
+  const numeratorRaw = content.slice(0, sepIdx);
+  const denominator = content.slice(sepIdx + 1);
+  const coefVarIdx = numeratorRaw.indexOf(COEF_VAR_SEPARATOR);
+  const coefficient = coefVarIdx === -1 ? numeratorRaw : numeratorRaw.slice(0, coefVarIdx);
+  const variable = coefVarIdx === -1 ? "" : numeratorRaw.slice(coefVarIdx + 1);
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        flexDirection: "column",
+        alignItems: "center",
+        verticalAlign: "middle",
+      }}
+    >
+      <span style={{ display: "inline-flex", alignItems: "baseline", paddingBottom: "0.15em" }}>
+        <XMark size="large">
+          <InlineMath math={coefficient} />
+        </XMark>
+        {variable.length > 0 ? (
+          <span style={{ marginLeft: 4 }}>
+            <InlineMath math={variable} />
+          </span>
+        ) : null}
+      </span>
+      <span
+        style={{
+          borderTop: `0.06em solid ${color}`,
+          alignSelf: "stretch",
+        }}
+      />
+      <span style={{ paddingTop: "0.15em" }}>
+        <XMark size="large">
+          <InlineMath math={denominator} />
+        </XMark>
+      </span>
+    </span>
+  );
+}
+
+// For the divide-form's coefficient-cancellation step: "(a)(x/a)" or
+// "(x/a)(a)" - the outer parenthetical multiplier AND the existing
+// fraction's own denominator both get the x-mark (both represent the
+// same coefficient value canceling out), while the fraction's
+// numerator (containing the variable) stays unmarked. Content format:
+// "L|R" (which side the outer multiplier is on) + coef/var separator +
+// outer + coef/var separator + numerator + stack separator +
+// denominator.
+function renderMarkedParenFraction(content: string, color: string): ReactNode {
+  const firstSep = content.indexOf(COEF_VAR_SEPARATOR);
+  if (firstSep === -1) return renderTextWithEmbeddedNumbers(content);
+  const side = content.slice(0, firstSep);
+  const rest = content.slice(firstSep + 1);
+  const secondSep = rest.indexOf(COEF_VAR_SEPARATOR);
+  if (secondSep === -1) return renderTextWithEmbeddedNumbers(rest);
+  const outer = rest.slice(0, secondSep);
+  const fracContent = rest.slice(secondSep + 1);
+  const stackSep = fracContent.indexOf(STACK_SEPARATOR);
+  if (stackSep === -1) return renderTextWithEmbeddedNumbers(fracContent);
+  const numerator = fracContent.slice(0, stackSep);
+  const denominator = fracContent.slice(stackSep + 1);
+
+  const outerMark = (
+    <span>
+      (
+      <XMark size="large">
+        <InlineMath math={outer} />
+      </XMark>
+      )
+    </span>
+  );
+  const fraction = (
+    <span
+      style={{
+        display: "inline-flex",
+        flexDirection: "column",
+        alignItems: "center",
+        verticalAlign: "middle",
+      }}
+    >
+      <span style={{ paddingBottom: "0.15em" }}>
+        <InlineMath math={numerator} />
+      </span>
+      <span style={{ borderTop: `0.06em solid ${color}`, alignSelf: "stretch" }} />
+      <span style={{ paddingTop: "0.15em" }}>
+        <XMark size="large">
+          <InlineMath math={denominator} />
+        </XMark>
+      </span>
+    </span>
+  );
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "2px" }}>
+      {side === "L" ? (
+        <>
+          {outerMark}
+          {fraction}
+        </>
+      ) : (
+        <>
+          {fraction}
+          {outerMark}
+        </>
+      )}
+    </span>
+  );
+}
 
 // Builds a fraction-bar LAYOUT ourselves (two stacked rows, divider in
 // between) instead of using KaTeX's own \dfrac. This is specifically for
@@ -273,6 +438,9 @@ function renderStackedFraction(content: string, color: string): ReactNode {
 function Cell({ math, color, align = "center" }: { math: string; color: string; align?: "center" | "right" }) {
   const isPlainText = math.startsWith(PLAINTEXT_PREFIX);
   const isStackedFraction = math.startsWith(STACKEDFRACTION_PREFIX);
+  const isMarkedTerm = math.startsWith(MARKEDTERM_PREFIX);
+  const isMarkedFraction = math.startsWith(MARKEDFRACTION_PREFIX);
+  const isMarkedParenFraction = math.startsWith(MARKEDPARENFRACTION_PREFIX);
   return (
     <div
       style={{
@@ -285,6 +453,14 @@ function Cell({ math, color, align = "center" }: { math: string; color: string; 
     >
       {isStackedFraction ? (
         renderStackedFraction(math.slice(STACKEDFRACTION_PREFIX.length), color)
+      ) : isMarkedFraction ? (
+        renderMarkedFraction(math.slice(MARKEDFRACTION_PREFIX.length), color)
+      ) : isMarkedParenFraction ? (
+        renderMarkedParenFraction(math.slice(MARKEDPARENFRACTION_PREFIX.length), color)
+      ) : isMarkedTerm ? (
+        <XMark>
+          <InlineMath math={math.slice(MARKEDTERM_PREFIX.length)} />
+        </XMark>
       ) : isPlainText ? (
         renderTextWithEmbeddedNumbers(math.slice(PLAINTEXT_PREFIX.length))
       ) : (
@@ -675,7 +851,15 @@ function EquationGrid({
       // touching the grid's own rowGap (which stays uniform for every
       // other row boundary).
       function boldWrap(math: string): string {
-        if (!math || math.startsWith(PLAINTEXT_PREFIX) || math.startsWith(STACKEDFRACTION_PREFIX)) return math;
+        if (
+          !math ||
+          math.startsWith(PLAINTEXT_PREFIX) ||
+          math.startsWith(STACKEDFRACTION_PREFIX) ||
+          math.startsWith(MARKEDTERM_PREFIX) ||
+          math.startsWith(MARKEDFRACTION_PREFIX) ||
+          math.startsWith(MARKEDPARENFRACTION_PREFIX)
+        )
+          return math;
         return `\\boldsymbol{${math}}`;
       }
 
