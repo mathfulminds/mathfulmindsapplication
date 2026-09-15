@@ -17,9 +17,9 @@ export default function OneStepInequalitiesPage() {
         Solving one-step inequalities
       </h1>
       <p style={{ color: "var(--ink-soft)", fontSize: 15, marginBottom: 32 }}>
-        Answer each step correctly to reveal the next line, including whether
-        the inequality sign flips. Every problem is randomly generated, so
-        you can practice as many as you like.
+        The goal is to get the variable alone and on the left side. You
+        should undo the operation on the side of the variable. You may have
+        to flip the sign during this process as well.
       </p>
       <StepSolver generate={generateOneStepInequalityInstance} skillName="One-step inequalities" />
     </div>
