@@ -64,7 +64,14 @@ export function generateEquation(): EquationInstance {
 
 export function buildSolverInstance(
   eq: EquationInstance,
-  variableSymbol: string = "x"
+  variableSymbol: string = "x",
+  // Which slot represents this equation's "current line" for marking
+  // purposes - defaults to "__initial__" for this skill's own direct
+  // use. parenthesesEquations.ts overrides this to "distributed", since
+  // that's the slot ITS OWN distribute steps put the post-distribution
+  // equation into - "__initial__" there still holds the pre-distribution
+  // row (e.g. "7(-2x-3)"), which never even has the term being canceled.
+  initialSlotId: string = "__initial__"
 ): SolverInstance {
   const { a, b, form, variableFirst, orientation, rhs, solution } = eq;
 
@@ -87,12 +94,28 @@ export function buildSolverInstance(
     cells: assembleRow(exprTerm1, exprTerm2, renderConstant(rhs), orientation),
   };
 
+  // Marked variant - the constant term gets an x-mark once
+  // cancel_constant confirms the two opposites combine to 0, not
+  // before. Matches the same pattern already used in the inequality
+  // skills and oneStepEquations.ts.
+  const markedExprTerm1 = bIsSecond ? exprTerm1 : `MARKEDTERM:${constantBNatural}`;
+  const markedExprTerm2 = bIsSecond ? `MARKEDTERM:${constantBForced}` : exprTerm2;
+  const initialRowMarked: GridRow = {
+    cells: assembleRow(markedExprTerm1, markedExprTerm2, renderConstant(rhs), orientation),
+  };
+
   const cancelValue = -b;
   const cancelDisplay = renderConstant(cancelValue, true, false);
   const cancelExpr1 = bIsSecond ? BLANK : cancelDisplay;
   const cancelExpr2 = bIsSecond ? cancelDisplay : BLANK;
   const cancelRow: GridRow = {
     cells: assembleRow(cancelExpr1, cancelExpr2, cancelDisplay, orientation, ""),
+  };
+  // Marked variant for the annotation's own opposite constant.
+  const cancelExpr1Marked = bIsSecond ? BLANK : `MARKEDTERM:${cancelDisplay}`;
+  const cancelExpr2Marked = bIsSecond ? `MARKEDTERM:${cancelDisplay}` : BLANK;
+  const cancelRowMarked: GridRow = {
+    cells: assembleRow(cancelExpr1Marked, cancelExpr2Marked, cancelDisplay, orientation, ""),
   };
 
   const newRhs = Math.round((rhs - b) * 100) / 100;
@@ -104,6 +127,7 @@ export function buildSolverInstance(
   };
 
   let stepBRow: GridRow;
+  let stepBRowMarked: GridRow;
   let stepBPrompt: string;
   let stepBChoices: Choice[];
   let stepBExplanation: string;
@@ -125,6 +149,14 @@ export function buildSolverInstance(
     const setupExpr1 = bIsSecond ? divSetup : BLANK;
     const setupExpr2 = bIsSecond ? BLANK : divSetup;
     stepBRow = { cells: assembleRow(setupExpr1, setupExpr2, divRhs, orientation) };
+    // Marked variant - coefficient and variable as separate pieces in
+    // the numerator (so the x-mark wraps just the coefficient), plus
+    // the denominator - added once confirm_coefficient_one confirms
+    // the coefficient becomes 1, not before.
+    const divSetupMarked = `MARKEDFRACTION:${a}\u0006${variableSymbol}\u0005${a}`;
+    const setupExpr1Marked = bIsSecond ? divSetupMarked : BLANK;
+    const setupExpr2Marked = bIsSecond ? BLANK : divSetupMarked;
+    stepBRowMarked = { cells: assembleRow(setupExpr1Marked, setupExpr2Marked, divRhs, orientation) };
     stepBPrompt = `What undoes multiplying ${variableSymbol} by ${a}?`;
     // "Dividing both sides by |b|" collides with the correct choice when
     // |b| happens to equal a - a legitimate input this function must
@@ -180,6 +212,14 @@ export function buildSolverInstance(
     const setupExpr1 = bIsSecond ? multipliedVarTerm : BLANK;
     const setupExpr2 = bIsSecond ? BLANK : multipliedVarTerm;
     stepBRow = { cells: assembleRow(setupExpr1, setupExpr2, multipliedConstant, orientation) };
+    // Marked-paren-fraction: the outer multiplier and the fraction's own
+    // denominator both get the x-mark, while the numerator (containing
+    // the variable) stays unmarked.
+    const side = exprIsLeftOfEquals ? "L" : "R";
+    const multipliedVarTermMarked = `MARKEDPARENFRACTION:${side}\u0006${a}\u0006${variableSymbol}\u0005${a}`;
+    const setupExpr1Marked = bIsSecond ? multipliedVarTermMarked : BLANK;
+    const setupExpr2Marked = bIsSecond ? BLANK : multipliedVarTermMarked;
+    stepBRowMarked = { cells: assembleRow(setupExpr1Marked, setupExpr2Marked, multipliedConstant, orientation) };
     stepBPrompt = `What undoes dividing ${variableSymbol} by ${a}?`;
     stepBChoices =
       Math.abs(b) !== a
@@ -233,7 +273,14 @@ export function buildSolverInstance(
   const coeffConfirmDistractors = dedupNumeric("1", coeffConfirmDistractorCandidates);
   const confirmCoefficientOne: SolverStep = {
     stepId: "confirm_coefficient_one",
-    rowUpdates: [{ slotId: "coefficient_confirmed", row: coeffConfirmedRow }],
+    // Updates BOTH "simplified" (adding the x-marks, now that
+    // "coefficient / coefficient = 1" is actually confirmed) and
+    // "coefficient_confirmed" (the new line showing the isolated
+    // variable).
+    rowUpdates: [
+      { slotId: "simplified", row: stepBRowMarked },
+      { slotId: "coefficient_confirmed", row: coeffConfirmedRow },
+    ],
     prompt: coeffConfirmPrompt,
     choices: shuffle([
       { text: "1", isCorrect: true, misconceptionTag: null },
@@ -293,7 +340,12 @@ export function buildSolverInstance(
   ]);
   const cancelConstant: SolverStep = {
     stepId: "cancel_constant",
-    rowUpdates: [],
+    // Both opposite constants get the x-mark together, once they're
+    // confirmed to combine to 0.
+    rowUpdates: [
+      { slotId: initialSlotId, row: initialRowMarked },
+      { slotId: "cancel_annotation", row: cancelRowMarked },
+    ],
     prompt: `What is ${absB} ${constOpSym} ${absB}?`,
     choices: shuffle([
       { text: "0", isCorrect: true, misconceptionTag: null },

@@ -1,5 +1,6 @@
 import type { SolverInstance, SolverStep, Choice, GridRow } from "./types";
 import {
+  BLANK,
   Orientation,
   assembleRow,
   eqColumnIndexFor,
@@ -83,19 +84,33 @@ export function buildParenSolverInstance(
 
   // Delegate everything after distribution to the existing two-step
   // engine (variableFirst is always true here - see note above).
-  const twoStep = buildTwoStepInstance({
-    a: mn,
-    b: mp,
-    form: "multiply",
-    variableFirst: true,
-    orientation,
-    rhs: q,
-    solution,
-  });
+  // "distributed" is passed as the initial-slot override, since that's
+  // the slot THIS file's own distribute steps put the post-distribution
+  // equation into - not "__initial__", which stays on the pre-
+  // distribution row here.
+  const twoStep = buildTwoStepInstance(
+    {
+      a: mn,
+      b: mp,
+      form: "multiply",
+      variableFirst: true,
+      orientation,
+      rhs: q,
+      solution,
+    },
+    variableSymbol,
+    "distributed"
+  );
 
   // --- Sub-step 1: distribute into the first (variable) term ---
+  // Only the distributed term appears here - everything else (the still-
+  // undistributed second term, the equals sign, and the rhs) stays
+  // blank until distribute_second_term reveals the complete line at
+  // once. The arc diagram itself is unaffected by this - it's driven
+  // separately by arcsShown, which still progresses 0 -> 1 -> 2 as
+  // normal.
   const rowAfterFirstTerm: GridRow = {
-    cells: assembleRow(mnxNatural, term2ColOriginal, renderConstant(q), orientation, "="),
+    cells: assembleRow(mnxNatural, BLANK, BLANK, orientation, ""),
   };
 
   const step1Choices: Choice[] = shuffle([

@@ -644,6 +644,11 @@ function DistributeDiagram({
   // other KaTeX syntax in term2 renders correctly instead of showing up
   // as literal backslash-text, and the font matches the grid exactly
   // since it's the same InlineMath component rendering both.
+  // arcsShown is ALSO a dependency, not just the token strings - the
+  // container's own paddingTop changes (0 before any arc, 34 once one is
+  // shown), which shifts the text's actual Y position in the DOM. Without
+  // re-measuring here, the arc math keeps using the stale pre-padding Y
+  // coordinate, drawing arcs disconnected from where the text now sits.
   useLayoutEffect(() => {
     if (!containerRef.current || !coefRef.current || !term1Ref.current || !term2Ref.current) {
       setMeasured(null);
@@ -659,7 +664,7 @@ function DistributeDiagram({
       term2X: term2Rect.left + term2Rect.width / 2 - containerRect.left,
       y: coefRect.top - containerRect.top,
     });
-  }, [coefficient, term1, term2]);
+  }, [coefficient, term1, term2, arcsShown]);
 
   const arcGap = 10;
   let arc1Path = "";
@@ -683,7 +688,10 @@ function DistributeDiagram({
   }
 
   return (
-    <div ref={containerRef} style={{ position: "relative", display: "inline-block", paddingTop: 34 }}>
+    <div
+      ref={containerRef}
+      style={{ position: "relative", display: "inline-block", paddingTop: arcsShown > 0 ? 34 : 0 }}
+    >
       {measured && (
         <svg
           style={{
@@ -928,12 +936,11 @@ function EquationGrid({
             );
           }
           if (colIndex === startCol + 1) return null; // absorbed into the spanning cell above
-          // Matches DistributeDiagram's own paddingTop:34 exactly, so
-          // these cells sit at the same baseline as the equation text
-          // inside the (now taller) spanning cell, instead of being
-          // centered against the row's full height - which includes the
-          // arc space above that text - and landing too high.
-          const paddedStyle = { paddingTop: 34, ...style };
+          // Matches DistributeDiagram's own paddingTop exactly (0 before
+          // any arc is shown, 34 once one is), so these cells sit at the
+          // same baseline as the equation text inside the spanning cell,
+          // instead of the two falling out of alignment with each other.
+          const paddedStyle = { paddingTop: annotation.arcsShown > 0 ? 34 : 0, ...style };
           return colIndex === eqColumnIndex ? (
             <div key={`${rowKey}-${colIndex}`} data-row-slot={slotIdForRow} style={paddedStyle}>
               <div style={{ textAlign: "center", color: "var(--ink-soft)", fontSize: 18, whiteSpace: "nowrap" }}>
