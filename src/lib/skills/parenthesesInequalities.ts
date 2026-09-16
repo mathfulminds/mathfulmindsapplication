@@ -1,5 +1,6 @@
 import type { SolverInstance, SolverStep, Choice, GridRow } from "./types";
 import {
+  BLANK,
   Orientation,
   assembleRow,
   eqColumnIndexFor,
@@ -74,19 +75,41 @@ export function buildParenInequalitySolverInstance(
   const mnxNatural = renderMultiplyTerm(mn, variableSymbol);
   const mpSigned = renderConstant(mp, true);
 
-  const twoStep = buildTwoStepInequalityInstance({
-    a: mn,
-    b: mp,
-    form: "multiply",
-    variableFirst: true,
-    orientation,
-    rhs: q,
-    boundary,
-    origSymbol,
-  });
+  // "distributed" is passed as the initial-slot override, since that's
+  // the slot THIS file's own distribute steps put the post-distribution
+  // equation into - not "__initial__", which stays on the pre-
+  // distribution row here. Same fix already made for
+  // parenthesesEquations.ts.
+  const twoStep = buildTwoStepInequalityInstance(
+    {
+      a: mn,
+      b: mp,
+      form: "multiply",
+      variableFirst: true,
+      orientation,
+      rhs: q,
+      boundary,
+      origSymbol,
+    },
+    variableSymbol,
+    "distributed"
+  );
 
+  // Only the distributed term appears here - everything else (the still-
+  // undistributed second term, the symbol, and the boundary) stays
+  // blank until distribute_second_term reveals the complete line at
+  // once. The arc diagram itself is unaffected - it's driven separately
+  // by arcsShown. Same fix already made for parenthesesEquations.ts.
+  //
+  // \mathrlap + \phantom makes this reserve the SAME width as
+  // term1ColOriginal ("3(x") while still rendering visibly at the left
+  // edge of that space - without this, termAlign:"right" (needed
+  // elsewhere for digit-place alignment across rows) would push the
+  // shorter "3x" to the RIGHT edge of the column instead, landing under
+  // "x" rather than under "3(" where the original term started.
+  const mnxNaturalLeftAligned = `\\mathrlap{${mnxNatural}}\\phantom{${term1ColOriginal}}`;
   const rowAfterFirstTerm: GridRow = {
-    cells: assembleRow(mnxNatural, term2ColOriginal, renderConstant(q), orientation, origSymbol),
+    cells: assembleRow(mnxNaturalLeftAligned, BLANK, BLANK, orientation, ""),
   };
 
   const step1Choices: Choice[] = shuffle([
@@ -100,7 +123,7 @@ export function buildParenInequalitySolverInstance(
     rowUpdates: [{ slotId: "distributed", row: rowAfterFirstTerm }],
     prompt: `What is $${m} \\times ${nxNatural}$?`,
     choices: step1Choices,
-    explanationOnCorrect: `$${m} \\times ${nxNatural} = ${mnxNatural}$. Distributing never flips the inequality sign.`,
+    explanationOnCorrect: `$${m} \\times ${nxNatural} = ${mnxNatural}$.`,
     distributeVisual: { coefficient: `${m}`, term1: nxNatural, term2: pSigned },
   };
 
@@ -115,7 +138,7 @@ export function buildParenInequalitySolverInstance(
     rowUpdates: [{ slotId: "distributed", row: twoStep.initialRow }],
     prompt: `What is $${m} \\times ${p}$?`,
     choices: step2Choices,
-    explanationOnCorrect: `$${m} \\times ${p} = ${mp}$. Distributing never flips the inequality sign.`,
+    explanationOnCorrect: `$${m} \\times ${p} = ${mp}$. The rest of the inequality gets brought down.`,
     distributeVisual: { coefficient: `${m}`, term1: nxNatural, term2: pSigned },
   };
 

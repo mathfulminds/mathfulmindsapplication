@@ -82,7 +82,15 @@ export function generateInequality(): InequalityInstance {
 
 export function buildSolverInstance(
   ineq: InequalityInstance,
-  variableSymbol: string = "x"
+  variableSymbol: string = "x",
+  // Which slot represents this equation's "current line" for marking
+  // purposes - defaults to "__initial__" for this skill's own direct
+  // use. parenthesesInequalities.ts overrides this to "distributed",
+  // since that's the slot ITS OWN distribute steps put the post-
+  // distribution equation into - "__initial__" there still holds the
+  // pre-distribution row, which never even has the term being canceled.
+  // Same fix already made for twoStepEquations.ts.
+  initialSlotId: string = "__initial__"
 ): SolverInstance {
   const { a, b, form, variableFirst, orientation, rhs, boundary, origSymbol } = ineq;
 
@@ -202,7 +210,7 @@ export function buildSolverInstance(
     // confirmed to combine to 0 - the original term on the initial row,
     // and its opposite in the cancel annotation, together.
     rowUpdates: [
-      { slotId: "__initial__", row: initialRowMarked },
+      { slotId: initialSlotId, row: initialRowMarked },
       { slotId: "cancel_annotation", row: cancelRowMarked },
     ],
     prompt: `What is ${absB} ${constOpSym} ${absB}?`,
