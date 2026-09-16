@@ -101,12 +101,28 @@ export function buildOneStepInstance(
       cells: assembleRow(exprTerm1, exprTerm2, renderConstant(rhs), orientation),
     };
 
+    // Marked variant - the constant term gets an x-mark once
+    // cancel_constant confirms the two opposites combine to 0, not
+    // before. Matches the same pattern already used in the inequality
+    // skills.
+    const markedExprTerm1 = bIsSecond ? exprTerm1 : `MARKEDTERM:${constantNatural}`;
+    const markedExprTerm2 = bIsSecond ? `MARKEDTERM:${constantForced}` : exprTerm2;
+    const initialRowMarked: GridRow = {
+      cells: assembleRow(markedExprTerm1, markedExprTerm2, renderConstant(rhs), orientation),
+    };
+
     const cancelValue = -b;
     const cancelDisplay = renderConstant(cancelValue, true, false);
     const cancelExpr1 = bIsSecond ? BLANK : cancelDisplay;
     const cancelExpr2 = bIsSecond ? cancelDisplay : BLANK;
     const cancelRow: GridRow = {
       cells: assembleRow(cancelExpr1, cancelExpr2, cancelDisplay, orientation, ""),
+    };
+    // Marked variant for the annotation's own opposite constant.
+    const cancelExpr1Marked = bIsSecond ? BLANK : `MARKEDTERM:${cancelDisplay}`;
+    const cancelExpr2Marked = bIsSecond ? `MARKEDTERM:${cancelDisplay}` : BLANK;
+    const cancelRowMarked: GridRow = {
+      cells: assembleRow(cancelExpr1Marked, cancelExpr2Marked, cancelDisplay, orientation, ""),
     };
 
     const finalExpr1 = bIsSecond ? variableSymbol : BLANK;
@@ -162,7 +178,12 @@ export function buildOneStepInstance(
     ]);
     const cancelConstant: SolverStep = {
       stepId: "cancel_constant",
-      rowUpdates: [],
+      // Both opposite constants get the x-mark together, once they're
+      // confirmed to combine to 0.
+      rowUpdates: [
+        { slotId: "__initial__", row: initialRowMarked },
+        { slotId: "cancel_annotation", row: cancelRowMarked },
+      ],
       prompt: `What is ${absB} ${cancelOpSym} ${absB}?`,
       choices: shuffle([
         { text: "0", isCorrect: true, misconceptionTag: null },
@@ -224,6 +245,7 @@ export function buildOneStepInstance(
   };
 
   let stepRow: GridRow;
+  let stepRowMarked: GridRow;
   let prompt: string;
   let choices: Choice[];
   let explanationOnCorrect: string;
@@ -241,6 +263,12 @@ export function buildOneStepInstance(
     const divSetup = `\\dfrac{${variableTermNatural}}{${a}}`;
     const divRhs = `\\dfrac{${rhs}}{${a}}`;
     stepRow = { cells: assembleRow(divSetup, BLANK, divRhs, orientation) };
+    // Marked variant - coefficient and variable as separate pieces in
+    // the numerator (so the x-mark wraps just the coefficient), plus
+    // the denominator - added once confirm_coefficient_one confirms
+    // the coefficient becomes 1, not before.
+    const divSetupMarked = `MARKEDFRACTION:${a}\u0006${variableSymbol}\u0005${a}`;
+    stepRowMarked = { cells: assembleRow(divSetupMarked, BLANK, divRhs, orientation) };
     prompt = `What undoes multiplying ${variableSymbol} by ${a}?`;
     choices = [
       { text: `Dividing both sides by ${a}`, isCorrect: true, misconceptionTag: null },
@@ -269,10 +297,15 @@ export function buildOneStepInstance(
     const multipliedVarTerm = exprIsLeftOfEquals
       ? `(${a})\\dfrac{${variableSymbol}}{${a}}`
       : `\\dfrac{${variableSymbol}}{${a}}(${a})`;
-    const multipliedConstant = constantIsLeftOfEquals
-      ? `(${a})(${rhs})`
-      : `(${rhs})(${a})`;
+    const multipliedConstant = constantIsLeftOfEquals ? `(${a})(${rhs})` : `(${rhs})(${a})`;
     stepRow = { cells: assembleRow(multipliedVarTerm, BLANK, multipliedConstant, orientation) };
+    // Marked-paren-fraction: the outer multiplier and the fraction's own
+    // denominator both get the x-mark (same coefficient value canceling
+    // via multiplication), while the numerator (containing the
+    // variable) stays unmarked.
+    const side = exprIsLeftOfEquals ? "L" : "R";
+    const multipliedVarTermMarked = `MARKEDPARENFRACTION:${side}\u0006${a}\u0006${variableSymbol}\u0005${a}`;
+    stepRowMarked = { cells: assembleRow(multipliedVarTermMarked, BLANK, multipliedConstant, orientation) };
     prompt = `What undoes dividing ${variableSymbol} by ${a}?`;
     choices = [
       { text: `Multiplying both sides by ${a}`, isCorrect: true, misconceptionTag: null },
@@ -355,7 +388,14 @@ export function buildOneStepInstance(
   const coeffConfirmDistractors = dedupNumeric("1", coeffConfirmDistractorCandidates);
   const confirmCoefficientOne: SolverStep = {
     stepId: "confirm_coefficient_one",
-    rowUpdates: [{ slotId: "coefficient_confirmed", row: coeffConfirmedRow }],
+    // Updates BOTH "__initial__" (adding the x-marks, now that
+    // "coefficient / coefficient = 1" is actually confirmed) and
+    // "coefficient_confirmed" (the new line showing the isolated
+    // variable).
+    rowUpdates: [
+      { slotId: "__initial__", row: stepRowMarked },
+      { slotId: "coefficient_confirmed", row: coeffConfirmedRow },
+    ],
     prompt: coeffConfirmPrompt,
     choices: shuffle([
       { text: "1", isCorrect: true, misconceptionTag: null },
