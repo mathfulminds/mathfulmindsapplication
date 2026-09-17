@@ -347,8 +347,12 @@ export function buildFractionSolverInstance(
 
     steps.push({
       stepId: "canonicalize_orientation",
-      rowUpdates: [{ slotId: "final", row: canonicalRow }],
-      prompt: `We want ${variableSymbol} written first. Does the inequality symbol flip when you swap which side ${variableSymbol} is on?`,
+      // Own separate slot, not "final" - so the pre-swap line stays
+      // visible, and this becomes a genuinely new line below it, rather
+      // than silently overwriting it. Same fix already made for
+      // twoStepInequalities.ts and oneStepInequalities.ts.
+      rowUpdates: [{ slotId: "canonicalized", row: canonicalRow }],
+      prompt: "The goal is to get variable on the left. Do we flip the sign when we swap sides?",
       choices: shuffle([
         {
           text: "Yes - the symbol flips when you swap sides",
@@ -361,9 +365,7 @@ export function buildFractionSolverInstance(
           misconceptionTag: "forgot_symbol_flips_on_side_swap",
         },
       ]),
-      explanationOnCorrect: `Swapping which side each quantity sits on flips the symbol: ${boundary} ${plainSymbol(
-        afterMultSymbol
-      )} ${variableSymbol} becomes ${variableSymbol} ${plainSymbol(canonicalSymbol)} ${boundary}.`,
+      explanationOnCorrect: "We flip the inequality signs when we swap the sides of the inequality.",
     });
   }
 
