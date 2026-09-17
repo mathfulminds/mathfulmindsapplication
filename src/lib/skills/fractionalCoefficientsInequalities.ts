@@ -24,6 +24,21 @@ import {
   symbolFromDirectionInclusive,
 } from "./inequalityCore";
 
+function dedupNumeric(
+  correctText: string,
+  candidates: { text: string; tag: string }[]
+): { text: string; tag: string }[] {
+  const seen = new Set([correctText]);
+  const out: { text: string; tag: string }[] = [];
+  for (const c of candidates) {
+    if (out.length === 2) break;
+    if (seen.has(c.text)) continue;
+    seen.add(c.text);
+    out.push(c);
+  }
+  return out;
+}
+
 interface FractionInequalityInstance {
   n: number; // numerator (signed - carries the coefficient's sign)
   d: number; // denominator (always positive)
@@ -89,56 +104,100 @@ export function buildFractionSolverInstance(
 
   const combinedExpr1 = bIsSecond ? variableTermNatural : BLANK;
   const combinedExpr2 = bIsSecond ? BLANK : variableTermNatural;
+  // Symbol-only reveal - sign_flip_check_constant's own row (comes
+  // before cancel_constant/combine_constant), showing just the resolved
+  // symbol with everything else blank, since neither the isolated
+  // variable side nor the combined value are known yet at this point.
+  const combinedRowSymbolOnly: GridRow = {
+    cells: assembleRow(BLANK, BLANK, BLANK, orientation, origSymbol),
+  };
+  // Full reveal - combine_constant's own row, now filling in both the
+  // variable side and the combined value together, since the symbol was
+  // already shown by sign_flip_check_constant on this same line.
   const combinedRow: GridRow = {
     cells: assembleRow(combinedExpr1, combinedExpr2, renderConstant(simplifiedRhs), orientation, origSymbol),
   };
 
   const constantIsPositive = b >= 0;
+  const absB = Math.abs(b);
+  const constOpSym = constantIsPositive ? "-" : "+";
   const stepAChoices: Choice[] = [
     {
       text: constantIsPositive
-        ? `Subtracting ${Math.abs(b)} from both sides`
-        : `Adding ${Math.abs(b)} to both sides`,
+        ? `Subtracting ${absB} from both sides`
+        : `Adding ${absB} to both sides`,
       isCorrect: true,
       misconceptionTag: null,
     },
     {
-      text: `${constantIsPositive ? "Divide" : "Multiply"} both sides by ${Math.abs(b)}`,
+      text: `${constantIsPositive ? "Divide" : "Multiply"} both sides by ${absB}`,
       isCorrect: false,
       misconceptionTag: "confuses_additive_and_multiplicative_inverse",
     },
     {
       text: constantIsPositive
-        ? `Adding ${Math.abs(b)} to both sides`
-        : `Subtracting ${Math.abs(b)} from both sides`,
+        ? `Adding ${absB} to both sides`
+        : `Subtracting ${absB} from both sides`,
       isCorrect: false,
       misconceptionTag: "flipped_the_operation",
     },
   ];
 
-  const stepA: SolverStep = {
-    stepId: "eliminate_constant",
-    rowUpdates: [
-      { slotId: "cancel_annotation", row: cancelRow },
-      { slotId: "simplified", row: combinedRow },
-    ],
+  const goalConstant: SolverStep = {
+    stepId: "goal_eliminate_constant",
+    rowUpdates: [{ slotId: "cancel_annotation", row: cancelRow }],
     prompt: `What undoes the ${signedWord(b)} on the side with the variable?`,
     choices: shuffle(stepAChoices),
     explanationOnCorrect: constantIsPositive
-      ? `Undo addition by subtracting ${Math.abs(b)} from both sides.`
-      : `Undo subtraction by adding ${Math.abs(b)} to both sides.`,
+      ? `Undo addition by subtracting ${absB} from both sides.`
+      : `Undo subtraction by adding ${absB} to both sides.`,
   };
 
   const stepAFlip: SolverStep = {
     stepId: "sign_flip_check_constant",
-    rowUpdates: [],
+    // Now comes BEFORE cancel_constant/combine_constant - creates the
+    // "simplified" line for the first time, showing just the resolved
+    // symbol with the constant value still blank.
+    rowUpdates: [{ slotId: "simplified", row: combinedRowSymbolOnly }],
     prompt: "Does the inequality sign flip here?",
     choices: shuffle([
       { text: "No, the sign stays the same", isCorrect: true, misconceptionTag: null },
       { text: "Yes, the sign flips", isCorrect: false, misconceptionTag: "flipped_when_not_needed" },
     ]),
-    explanationOnCorrect:
-      "Adding or subtracting the same value from both sides never flips an inequality - only multiplying by a negative number does.",
+    explanationOnCorrect: "Adding or subtracting the same value from both sides never flips an inequality.",
+  };
+
+  const cancelConstDistractors = dedupNumeric("0", [
+    { text: `${2 * absB}`, tag: "flipped_the_operation" },
+    { text: `${absB}`, tag: "forgot_to_apply_operation" },
+  ]);
+  const cancelConstant: SolverStep = {
+    stepId: "cancel_constant",
+    rowUpdates: [],
+    prompt: `What is ${absB} ${constOpSym} ${absB}?`,
+    choices: shuffle([
+      { text: "0", isCorrect: true, misconceptionTag: null },
+      { text: cancelConstDistractors[0].text, isCorrect: false, misconceptionTag: cancelConstDistractors[0].tag },
+      { text: cancelConstDistractors[1].text, isCorrect: false, misconceptionTag: cancelConstDistractors[1].tag },
+    ]),
+    explanationOnCorrect: "The constants are opposites resulting in 0.",
+  };
+
+  const combineConstDistractors = dedupNumeric(`${simplifiedRhs}`, [
+    { text: `${constOpSym === "-" ? rhs + absB : rhs - absB}`, tag: "flipped_the_operation" },
+    { text: `${-simplifiedRhs}`, tag: "sign_error" },
+    { text: `${simplifiedRhs + 1}`, tag: "arithmetic_slip" },
+  ]);
+  const combineConstant: SolverStep = {
+    stepId: "combine_constant",
+    rowUpdates: [{ slotId: "simplified", row: combinedRow }],
+    prompt: `What is ${rhs} ${constOpSym} ${absB}?`,
+    choices: shuffle([
+      { text: `${simplifiedRhs}`, isCorrect: true, misconceptionTag: null },
+      { text: combineConstDistractors[0].text, isCorrect: false, misconceptionTag: combineConstDistractors[0].tag },
+      { text: combineConstDistractors[1].text, isCorrect: false, misconceptionTag: combineConstDistractors[1].tag },
+    ]),
+    explanationOnCorrect: `The terms combine to ${simplifiedRhs}. The rest of the inequality gets brought down unchanged.`,
   };
 
   // --- Step B: multiply by the reciprocal (flips iff the reciprocal is negative, i.e. iff n < 0) ---
@@ -190,9 +249,18 @@ export function buildFractionSolverInstance(
   const willFlip = n < 0;
   const afterMultSymbol = willFlip ? flipSymbol(origSymbol) : origSymbol;
 
+  // Symbol-only reveal - creates the "final" line for the first time,
+  // showing just the resolved (possibly flipped) symbol with everything
+  // else blank. Matches the constant phase's own sign_flip_check
+  // exactly - confirmCoefficientOne (below) then evolves this SAME
+  // line, filling in the isolated variable.
+  const finalRowSymbolOnly: GridRow = {
+    cells: assembleRow(BLANK, BLANK, BLANK, orientation, afterMultSymbol),
+  };
+
   const stepBFlip: SolverStep = {
     stepId: "sign_flip_check_coefficient",
-    rowUpdates: [],
+    rowUpdates: [{ slotId: "final", row: finalRowSymbolOnly }],
     prompt: `Does the inequality sign flip here? (multiplying both sides by ${reciprocalKatex})`,
     choices: shuffle([
       {
@@ -211,10 +279,33 @@ export function buildFractionSolverInstance(
       : `The reciprocal, ${reciprocalKatex}, is positive, so multiplying both sides by it does not flip the inequality sign.`,
   };
 
-  // --- Step C: compute the resulting value ---
-  const needsCanonicalize = orientation === "expressionRight";
+  // ---------- Confirm the coefficient becomes 1 ----------
+  // Evolves the SAME "final" line the flip-check already created,
+  // filling in the isolated variable now that the symbol is resolved.
   const finalExpr1 = bIsSecond ? variableSymbol : BLANK;
   const finalExpr2 = bIsSecond ? BLANK : variableSymbol;
+  const coeffConfirmedRow: GridRow = {
+    cells: assembleRow(finalExpr1, finalExpr2, BLANK, orientation, afterMultSymbol),
+  };
+  const confirmDistractors = dedupNumeric("1", [
+    { text: coefficientKatex, tag: "forgot_to_apply_operation" },
+    { text: "0", tag: "confuses_division_with_subtraction_pattern" },
+    { text: reciprocalKatex, tag: "left_answer_as_reciprocal" },
+  ]);
+  const confirmCoefficientOne: SolverStep = {
+    stepId: "confirm_coefficient_one",
+    rowUpdates: [{ slotId: "final", row: coeffConfirmedRow }],
+    prompt: `What is ${coefficientKatex} \u00d7 ${reciprocalKatex}?`,
+    choices: shuffle([
+      { text: "1", isCorrect: true, misconceptionTag: null },
+      { text: confirmDistractors[0].text, isCorrect: false, misconceptionTag: confirmDistractors[0].tag },
+      { text: confirmDistractors[1].text, isCorrect: false, misconceptionTag: confirmDistractors[1].tag },
+    ]),
+    explanationOnCorrect: `${coefficientKatex} and ${reciprocalKatex} are reciprocals, so ${coefficientKatex} \u00d7 ${reciprocalKatex} equals 1, so the variable is isolated.`,
+  };
+
+  // --- Step C: compute the resulting value ---
+  const needsCanonicalize = orientation === "expressionRight";
   const finalRow: GridRow = {
     cells: assembleRow(finalExpr1, finalExpr2, renderConstant(boundary), orientation, afterMultSymbol),
     highlight: needsCanonicalize ? undefined : "success",
@@ -234,7 +325,16 @@ export function buildFractionSolverInstance(
     explanationOnCorrect: `${simplifiedRhs} \u00d7 ${reciprocalKatex} = ${boundary}.`,
   };
 
-  const steps: SolverStep[] = [stepA, stepAFlip, stepB, stepBFlip, stepC];
+  const steps: SolverStep[] = [
+    goalConstant,
+    stepAFlip,
+    cancelConstant,
+    combineConstant,
+    stepB,
+    stepBFlip,
+    confirmCoefficientOne,
+    stepC,
+  ];
 
   // --- Step D (conditional): canonicalize so the variable reads first ---
   let canonicalSymbol = afterMultSymbol;
