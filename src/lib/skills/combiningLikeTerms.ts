@@ -111,6 +111,19 @@ export function buildSolverInstance(
     cells: assembleOriented(plainTerm(combinedA, x), BLANK, renderConstant(b, true), renderConstant(c)),
   };
 
+  // Marked variant - the constant term gets an x-mark once cancel_constant
+  // confirms the two opposites combine to 0, not before. This marks
+  // "combined_terms" (not "__initial__"), since combine_like_terms
+  // already made that the current visible line by this point.
+  const combinedRowMarked: GridRow = {
+    cells: assembleOriented(
+      plainTerm(combinedA, x),
+      BLANK,
+      `MARKEDTERM:${renderConstant(b, true)}`,
+      renderConstant(c)
+    ),
+  };
+
   const combineCorrect = plainTerm(combinedA, x);
   const combineFlipValue = a1 - a2;
   const combineDistractors = dedupNumeric(combineCorrect, [
@@ -147,6 +160,10 @@ export function buildSolverInstance(
   const cancelDisplayAtC = renderConstant(-b, true, false);
   const cancelRow: GridRow = {
     cells: assembleOriented(BLANK, BLANK, cancelDisplayAtB, cancelDisplayAtC, ""),
+  };
+  // Marked variant for the annotation's own opposite constant.
+  const cancelRowMarked: GridRow = {
+    cells: assembleOriented(BLANK, BLANK, `MARKEDTERM:${cancelDisplayAtB}`, cancelDisplayAtC, ""),
   };
 
   const correctOpText = bPositive ? `Subtracting ${absB} from both sides` : `Adding ${absB} to both sides`;
@@ -195,7 +212,15 @@ export function buildSolverInstance(
 
   const cancelConstant: SolverStep = {
     stepId: "cancel_constant",
-    rowUpdates: [{ slotId: "reduced_equation", row: reducedRow }],
+    // Both opposite constants get the x-mark together, once they're
+    // confirmed to combine to 0 - alongside revealing "reduced_equation"
+    // as before, since this file's cancel_constant does both jobs in one
+    // step (no separate combine_constant step here).
+    rowUpdates: [
+      { slotId: "combined_terms", row: combinedRowMarked },
+      { slotId: "cancel_annotation", row: cancelRowMarked },
+      { slotId: "reduced_equation", row: reducedRow },
+    ],
     prompt: `What is ${b} ${opSym} ${absB}?`,
     choices: shuffle([
       { text: "0", isCorrect: true, misconceptionTag: null },
@@ -213,6 +238,14 @@ export function buildSolverInstance(
   const divRhs = `\\dfrac{${newRhs}}{${combinedA}}`;
   const divRow: GridRow = {
     cells: assembleOriented(divSetup, BLANK, BLANK, divRhs),
+  };
+  // Marked variant - same MARKEDFRACTION technique used everywhere else
+  // for this divide-form case: the coefficient and its own copy in the
+  // denominator are the canceling pair, marked together once
+  // confirm_coefficient_one confirms it, not before.
+  const divSetupMarked = `MARKEDFRACTION:${combinedA}\u0006${x}\u0005${combinedA}`;
+  const divRowMarked: GridRow = {
+    cells: assembleOriented(divSetupMarked, BLANK, BLANK, divRhs),
   };
 
   const step4Choices: Choice[] =
@@ -267,7 +300,14 @@ export function buildSolverInstance(
 
   const confirmCoefficientOne: SolverStep = {
     stepId: "confirm_coefficient_one",
-    rowUpdates: [{ slotId: "coefficient_confirmed", row: coeffConfirmedRow }],
+    // Updates BOTH "reduced_equation" (adding the x-marks, now that the
+    // coefficient is actually confirmed to cancel) and
+    // "coefficient_confirmed" (the new line showing the isolated
+    // variable).
+    rowUpdates: [
+      { slotId: "reduced_equation", row: divRowMarked },
+      { slotId: "coefficient_confirmed", row: coeffConfirmedRow },
+    ],
     prompt: `What is ${combinedA} \u00f7 ${combinedA}?`,
     choices: shuffle([
       { text: "1", isCorrect: true, misconceptionTag: null },
