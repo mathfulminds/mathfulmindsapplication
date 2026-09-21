@@ -137,6 +137,17 @@ export function buildNonIntegerSolverInstance(
     cells: assembleRow(exprTerm1, exprTerm2, renderGridValue(rhs, mode), orientation),
   };
 
+  // Marked variant - the constant term gets an x-mark once cancel_constant
+  // confirms the two opposites combine to 0, not before. Wraps whatever
+  // renderGridValue already produced (including its own PLAINTEXT_PREFIX
+  // for a repeating decimal-mode value) - MARKEDTERM: now detects that
+  // nested prefix itself, so this works correctly for both modes.
+  const markedExprTerm1 = bIsSecond ? exprTerm1 : `MARKEDTERM:${bNatural}`;
+  const markedExprTerm2 = bIsSecond ? `MARKEDTERM:${bForced}` : exprTerm2;
+  const initialRowMarked: GridRow = {
+    cells: assembleRow(markedExprTerm1, markedExprTerm2, renderGridValue(rhs, mode), orientation),
+  };
+
   // Step 1: eliminate the constant term - the cancellation annotation and
   // combined result now consistently match the problem's mode, fixing the
   // "silently switches to a fraction" inconsistency.
@@ -146,6 +157,12 @@ export function buildNonIntegerSolverInstance(
   const cancelExpr2 = bIsSecond ? cancelDisplay : BLANK;
   const cancelRow: GridRow = {
     cells: assembleRow(cancelExpr1, cancelExpr2, cancelDisplay, orientation, ""),
+  };
+  // Marked variant for the annotation's own opposite constant.
+  const cancelExpr1Marked = bIsSecond ? BLANK : `MARKEDTERM:${cancelDisplay}`;
+  const cancelExpr2Marked = bIsSecond ? `MARKEDTERM:${cancelDisplay}` : BLANK;
+  const cancelRowMarked: GridRow = {
+    cells: assembleRow(cancelExpr1Marked, cancelExpr2Marked, cancelDisplay, orientation, ""),
   };
 
   const simplifiedRhs = subFraction(rhs, b); // = a * solution, exactly
@@ -167,6 +184,7 @@ export function buildNonIntegerSolverInstance(
   // operation is displayed.
   const reciprocal = renderReciprocal(a, 1);
   let stepBRow: GridRow;
+  let stepBRowMarked: GridRow;
   if (mode === "fraction") {
     // Real KaTeX either way for the variable side - a plain-integer
     // coefficient term never needs the overline treatment.
@@ -175,6 +193,16 @@ export function buildNonIntegerSolverInstance(
     const setupExpr1 = bIsSecond ? multipliedVarTerm : BLANK;
     const setupExpr2 = bIsSecond ? BLANK : multipliedVarTerm;
     stepBRow = { cells: assembleRow(setupExpr1, setupExpr2, multipliedConstant, orientation) };
+    // Marked variant - the reciprocal and the coefficient inside "ax" are
+    // the canceling pair (their product is 1), so both get the x-mark
+    // together, once confirm_coefficient_one confirms that - not before.
+    // Only the variable side needs a mark; the constant side is just a
+    // computed result, same as the divide-form case elsewhere never
+    // marks its own rhs either.
+    const multipliedVarTermMarked = `MARKEDPARENMULT:${reciprocal}\u0007${a}\u0006${variableSymbol}`;
+    const setupExpr1Marked = bIsSecond ? multipliedVarTermMarked : BLANK;
+    const setupExpr2Marked = bIsSecond ? BLANK : multipliedVarTermMarked;
+    stepBRowMarked = { cells: assembleRow(setupExpr1Marked, setupExpr2Marked, multipliedConstant, orientation) };
   } else {
     // Unchanged from before the reciprocal change - real KaTeX \dfrac for
     // the variable side (numerator/denominator always plain integers,
@@ -185,6 +213,14 @@ export function buildNonIntegerSolverInstance(
     const setupExpr1 = bIsSecond ? divSetup : BLANK;
     const setupExpr2 = bIsSecond ? BLANK : divSetup;
     stepBRow = { cells: assembleRow(setupExpr1, setupExpr2, divRhs, orientation) };
+    // Marked variant - same MARKEDFRACTION technique already used for
+    // the divide-form case in twoStepEquations.ts and everywhere else:
+    // the coefficient and its own copy in the denominator are the
+    // canceling pair, marked together once confirmed.
+    const divSetupMarked = `MARKEDFRACTION:${a}\u0006${variableSymbol}\u0005${a}`;
+    const setupExpr1Marked = bIsSecond ? divSetupMarked : BLANK;
+    const setupExpr2Marked = bIsSecond ? BLANK : divSetupMarked;
+    stepBRowMarked = { cells: assembleRow(setupExpr1Marked, setupExpr2Marked, divRhs, orientation) };
   }
 
   // Step 3: final answer - the one that gets graded, so it MUST be
@@ -239,7 +275,12 @@ export function buildNonIntegerSolverInstance(
 
   const cancelConstant: SolverStep = {
     stepId: "cancel_constant",
-    rowUpdates: [],
+    // Both opposite constants get the x-mark together, once they're
+    // confirmed to combine to 0.
+    rowUpdates: [
+      { slotId: "__initial__", row: initialRowMarked },
+      { slotId: "cancel_annotation", row: cancelRowMarked },
+    ],
     prompt: `What is ${bAbsPrompt} ${bIsPositive ? "-" : "+"} ${bAbsPrompt}?`,
     choices: shuffle([
       { text: "$0$", isCorrect: true, misconceptionTag: null },
@@ -351,7 +392,14 @@ export function buildNonIntegerSolverInstance(
   const coeffConfirmDistractors = dedupNumeric("$1$", confirmDistractorCandidates);
   const confirmCoefficientOne: SolverStep = {
     stepId: "confirm_coefficient_one",
-    rowUpdates: [{ slotId: "coefficient_confirmed", row: coeffConfirmedRow }],
+    // Updates BOTH "simplified" (adding the x-marks, now that the
+    // coefficient is actually confirmed to cancel) and
+    // "coefficient_confirmed" (the new line showing the isolated
+    // variable).
+    rowUpdates: [
+      { slotId: "simplified", row: stepBRowMarked },
+      { slotId: "coefficient_confirmed", row: coeffConfirmedRow },
+    ],
     prompt: confirmPrompt,
     choices: shuffle([
       { text: "$1$", isCorrect: true, misconceptionTag: null },

@@ -257,6 +257,44 @@ function renderParenMult(content: string, color: string): ReactNode {
   );
 }
 
+// Marked variant of PARENMULT: for nonIntegerSolutions.ts's fraction-mode
+// reciprocal technique, e.g. "(reciprocal)(coefficient x)" where the
+// reciprocal and the coefficient are the canceling pair (their product is
+// 1) and get the x-mark together, while the variable itself stays
+// unmarked - same "mark what cancels, leave the variable alone" rule as
+// every other coefficient-phase mark. There's no fraction bar here (two
+// plain parenthetical groups, not a numerator/denominator), so this
+// can't reuse renderMarkedParenFraction directly.
+// Format: "MARKEDPARENMULT:{reciprocal}\u0007{coefficient}\u0006{variableSymbol}".
+const MARKEDPARENMULT_PREFIX = "MARKEDPARENMULT:";
+
+function renderMarkedParenMult(content: string, color: string): ReactNode {
+  const sepIdx = content.indexOf(PARENMULT_SEPARATOR);
+  if (sepIdx === -1) return renderTextWithEmbeddedNumbers(content);
+  const reciprocal = content.slice(0, sepIdx);
+  const rest = content.slice(sepIdx + 1);
+  const coefVarSep = rest.indexOf(COEF_VAR_SEPARATOR);
+  if (coefVarSep === -1) return renderTextWithEmbeddedNumbers(rest);
+  const coefficient = rest.slice(0, coefVarSep);
+  const variableSymbol = rest.slice(coefVarSep + 1);
+  return (
+    <span style={{ color, display: "inline-flex", alignItems: "center" }}>
+      (
+      <XMark size="large">
+        <InlineMath math={reciprocal} />
+      </XMark>
+      )(
+      <XMark size="large">
+        <InlineMath math={coefficient} />
+      </XMark>
+      <span style={{ marginLeft: 4 }}>
+        <InlineMath math={variableSymbol} />
+      </span>
+      )
+    </span>
+  );
+}
+
 // Two crossing diagonal lines over whatever's inside - used to show a
 // term or a fraction's numerator/denominator has been canceled out,
 // matching the handwritten convention of striking through a canceled
@@ -461,6 +499,7 @@ function Cell({ math, color, align = "center" }: { math: string; color: string; 
   const isMarkedFraction = math.startsWith(MARKEDFRACTION_PREFIX);
   const isMarkedParenFraction = math.startsWith(MARKEDPARENFRACTION_PREFIX);
   const isParenMult = math.startsWith(PARENMULT_PREFIX);
+  const isMarkedParenMult = math.startsWith(MARKEDPARENMULT_PREFIX);
   return (
     <div
       style={{
@@ -477,11 +516,24 @@ function Cell({ math, color, align = "center" }: { math: string; color: string; 
         renderMarkedFraction(math.slice(MARKEDFRACTION_PREFIX.length), color)
       ) : isMarkedParenFraction ? (
         renderMarkedParenFraction(math.slice(MARKEDPARENFRACTION_PREFIX.length), color)
+      ) : isMarkedParenMult ? (
+        renderMarkedParenMult(math.slice(MARKEDPARENMULT_PREFIX.length), color)
       ) : isParenMult ? (
         renderParenMult(math.slice(PARENMULT_PREFIX.length), color)
       ) : isMarkedTerm ? (
         <XMark>
-          <InlineMath math={math.slice(MARKEDTERM_PREFIX.length)} />
+          {math.slice(MARKEDTERM_PREFIX.length).startsWith(PLAINTEXT_PREFIX) ? (
+            // The marked term can itself be a decimal-mode value that
+            // repeats (e.g. a constant b whose fraction form has one of
+            // the repeating-decimal denominators) - detect the nested
+            // PLAINTEXT_PREFIX and render through the same plaintext-
+            // with-overline path PLAINTEXT_PREFIX itself uses, rather
+            // than passing it to InlineMath/KaTeX, which doesn't
+            // understand this prefix or the overline markers at all.
+            renderTextWithEmbeddedNumbers(math.slice(MARKEDTERM_PREFIX.length + PLAINTEXT_PREFIX.length))
+          ) : (
+            <InlineMath math={math.slice(MARKEDTERM_PREFIX.length)} />
+          )}
         </XMark>
       ) : isPlainText ? (
         renderTextWithEmbeddedNumbers(math.slice(PLAINTEXT_PREFIX.length))
@@ -888,6 +940,7 @@ function EquationGrid({
           math.startsWith(MARKEDTERM_PREFIX) ||
           math.startsWith(MARKEDFRACTION_PREFIX) ||
           math.startsWith(MARKEDPARENFRACTION_PREFIX) ||
+          math.startsWith(MARKEDPARENMULT_PREFIX) ||
           math.startsWith(PARENMULT_PREFIX)
         )
           return math;
