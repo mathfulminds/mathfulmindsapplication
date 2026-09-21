@@ -8,6 +8,7 @@ import {
   randInt,
   randSign,
   renderMultiplyTerm,
+  renderReciprocal,
   shuffle,
 } from "./isolateVariableCore";
 import {
@@ -23,6 +24,21 @@ import {
   subFraction,
   terminatesAsDecimal,
 } from "./fraction";
+
+function dedupNumeric(
+  correctText: string,
+  candidates: { text: string; tag: string }[]
+): { text: string; tag: string }[] {
+  const seen = new Set([correctText]);
+  const out: { text: string; tag: string }[] = [];
+  for (const c of candidates) {
+    if (out.length === 2) break;
+    if (seen.has(c.text)) continue;
+    seen.add(c.text);
+    out.push(c);
+  }
+  return out;
+}
 
 export type Mode = "fraction" | "decimal";
 
@@ -141,23 +157,35 @@ export function buildNonIntegerSolverInstance(
     cells: assembleRow(combinedExpr1, combinedExpr2, combinedKatex, orientation),
   };
 
-  // Step 2: division setup, ALWAYS shown as a vertically stacked bar.
-  // Fraction mode uses a real KaTeX \dfrac (numerator/denominator are
-  // always plain integers there, no overline ever needed). Decimal mode
-  // builds the stacked layout ourselves instead, so the numerator can use
-  // the same reliable real-KaTeX-plus-our-own-border technique as
-  // everywhere else, rather than KaTeX's own \overline nested inside a
-  // fraction (which has the same documented rendering bug).
-  const divSetup = `\\dfrac{${renderMultiplyTerm(a, variableSymbol)}}{${a}}`;
-  const divRhs =
-    mode === "fraction"
-      ? `\\dfrac{${simplifiedRhs.num}}{${simplifiedRhs.den * a}}`
-      : `STACKEDFRACTION:${decimalExpansionToPlainText(simplifiedRhs)}\u0005${a}`;
-  const setupExpr1 = bIsSecond ? divSetup : BLANK;
-  const setupExpr2 = bIsSecond ? BLANK : divSetup;
-  const stepBRow: GridRow = {
-    cells: assembleRow(setupExpr1, setupExpr2, divRhs, orientation),
-  };
+  // Step 2: fraction mode multiplies by the reciprocal of a rather than
+  // dividing, since dividing merges into the fraction's own denominator
+  // (e.g. -160/11 becomes the messier -160/-88); decimal mode keeps the
+  // original divide-and-stack technique instead, since multiplying an
+  // already-repeating decimal by a fraction reads worse than the plain
+  // division did, not better. So the two modes now genuinely diverge in
+  // which OPERATION the coefficient step teaches, not just how the same
+  // operation is displayed.
+  const reciprocal = renderReciprocal(a, 1);
+  let stepBRow: GridRow;
+  if (mode === "fraction") {
+    // Real KaTeX either way for the variable side - a plain-integer
+    // coefficient term never needs the overline treatment.
+    const multipliedVarTerm = `(${reciprocal})${variableTermNatural}`;
+    const multipliedConstant = `PARENMULT:${reciprocal}\u0007${fractionToKatex(simplifiedRhs)}`;
+    const setupExpr1 = bIsSecond ? multipliedVarTerm : BLANK;
+    const setupExpr2 = bIsSecond ? BLANK : multipliedVarTerm;
+    stepBRow = { cells: assembleRow(setupExpr1, setupExpr2, multipliedConstant, orientation) };
+  } else {
+    // Unchanged from before the reciprocal change - real KaTeX \dfrac for
+    // the variable side (numerator/denominator always plain integers,
+    // never needs an overline), and the same stacked-layout technique
+    // for the constant side as everywhere else in decimal mode.
+    const divSetup = `\\dfrac{${renderMultiplyTerm(a, variableSymbol)}}{${a}}`;
+    const divRhs = `STACKEDFRACTION:${decimalExpansionToPlainText(simplifiedRhs)}\u0005${a}`;
+    const setupExpr1 = bIsSecond ? divSetup : BLANK;
+    const setupExpr2 = bIsSecond ? BLANK : divSetup;
+    stepBRow = { cells: assembleRow(setupExpr1, setupExpr2, divRhs, orientation) };
+  }
 
   // Step 3: final answer - the one that gets graded, so it MUST be
   // reliable. Uses the plain-text Unicode overline, never KaTeX's
@@ -195,12 +223,13 @@ export function buildNonIntegerSolverInstance(
     },
   ];
 
-  const stepA: SolverStep = {
-    stepId: "eliminate_constant",
-    rowUpdates: [
-      { slotId: "cancel_annotation", row: cancelRow },
-      { slotId: "simplified", row: combinedRow },
-    ],
+  // Split into three granular steps (goal -> confirm cancellation ->
+  // confirm the new value), matching the pattern already established in
+  // every other retrofitted skill, instead of jumping straight from
+  // "choose the operation" to the fully-simplified row in one step.
+  const goalConstant: SolverStep = {
+    stepId: "goal_eliminate_constant",
+    rowUpdates: [{ slotId: "cancel_annotation", row: cancelRow }],
     prompt: `What undoes the ${b.num >= 0 ? "+" : "-"}${bAbsPrompt} on the side with the variable?`,
     choices: shuffle(stepAChoices),
     explanationOnCorrect: bIsPositive
@@ -208,28 +237,128 @@ export function buildNonIntegerSolverInstance(
       : `Undo subtraction by adding ${bAbsPrompt} to both sides.`,
   };
 
+  const cancelConstant: SolverStep = {
+    stepId: "cancel_constant",
+    rowUpdates: [],
+    prompt: `What is ${bAbsPrompt} ${bIsPositive ? "-" : "+"} ${bAbsPrompt}?`,
+    choices: shuffle([
+      { text: "$0$", isCorrect: true, misconceptionTag: null },
+      {
+        text: `$${b.num >= 0 ? "2" : "-2"}$ \u00d7 ${bAbsPrompt}`,
+        isCorrect: false,
+        misconceptionTag: "flipped_the_operation",
+      },
+      { text: bAbsPrompt, isCorrect: false, misconceptionTag: "forgot_to_apply_operation" },
+    ]),
+    explanationOnCorrect: "The constants are opposites resulting in 0.",
+  };
+
+  const combineConstDistractors = dedupNumeric(renderPromptValue(simplifiedRhs, mode), [
+    { text: renderPromptValue({ num: -simplifiedRhs.num, den: simplifiedRhs.den }, mode), tag: "sign_error" },
+    { text: renderPromptValue(rhs, mode), tag: "forgot_to_apply_operation" },
+    { text: renderPromptValue(addFraction(simplifiedRhs, fromInt(1)), mode), tag: "arithmetic_slip" },
+  ]);
+  const combineConstant: SolverStep = {
+    stepId: "combine_constant",
+    rowUpdates: [{ slotId: "simplified", row: combinedRow }],
+    prompt: `What is ${renderPromptValue(rhs, mode)} ${bIsPositive ? "-" : "+"} ${bAbsPrompt}?`,
+    choices: shuffle([
+      { text: renderPromptValue(simplifiedRhs, mode), isCorrect: true, misconceptionTag: null },
+      { text: combineConstDistractors[0].text, isCorrect: false, misconceptionTag: combineConstDistractors[0].tag },
+      { text: combineConstDistractors[1].text, isCorrect: false, misconceptionTag: combineConstDistractors[1].tag },
+    ]),
+    explanationOnCorrect: `The terms combine to ${renderPromptValue(simplifiedRhs, mode)}. The rest of the equation gets brought down unchanged.`,
+  };
+
   // ---- Step B choices ----
-  const simplifiedRhsPrompt = renderPromptValue(simplifiedRhs, mode);
-  const stepBChoices: Choice[] = [
-    { text: `Dividing both sides by ${a}`, isCorrect: true, misconceptionTag: null },
-    {
-      text: `Multiplying both sides by ${a}`,
-      isCorrect: false,
-      misconceptionTag: "confuses_additive_and_multiplicative_inverse",
-    },
-    {
-      text: `Dividing both sides by ${simplifiedRhsPrompt}`,
-      isCorrect: false,
-      misconceptionTag: "targets_wrong_term_first",
-    },
-  ];
+  const reciprocalKatex = `$${reciprocal}$`;
+  const coefficientKatex = `$${a}$`;
+  let stepBChoices: Choice[];
+  let stepBExplanation: string;
+  if (mode === "fraction") {
+    stepBChoices = [
+      { text: `Multiplying both sides by ${reciprocalKatex}`, isCorrect: true, misconceptionTag: null },
+      {
+        text: `Multiplying both sides by ${coefficientKatex}`,
+        isCorrect: false,
+        misconceptionTag: "forgot_to_flip_reciprocal",
+      },
+      {
+        text: `Dividing both sides by ${reciprocalKatex}`,
+        isCorrect: false,
+        misconceptionTag: "confuses_additive_and_multiplicative_inverse",
+      },
+    ];
+    stepBExplanation = "Multiplying both sides by the reciprocal clears the coefficient.";
+  } else {
+    stepBChoices = [
+      { text: `Dividing both sides by ${coefficientKatex}`, isCorrect: true, misconceptionTag: null },
+      {
+        text: `Multiplying both sides by ${coefficientKatex}`,
+        isCorrect: false,
+        misconceptionTag: "confuses_additive_and_multiplicative_inverse",
+      },
+      {
+        text: `Dividing both sides by ${renderPromptValue(simplifiedRhs, mode)}`,
+        isCorrect: false,
+        misconceptionTag: "targets_wrong_term_first",
+      },
+    ];
+    stepBExplanation = `Undo multiplication by dividing both sides by ${a}.`;
+  }
 
   const stepB: SolverStep = {
     stepId: "eliminate_coefficient",
     rowUpdates: [{ slotId: "simplified", row: stepBRow }],
-    prompt: `What undoes multiplying ${variableSymbol} by ${a}?`,
+    prompt:
+      mode === "fraction"
+        ? `What operation isolates ${variableSymbol} when its coefficient is ${coefficientKatex}?`
+        : `What undoes multiplying ${variableSymbol} by ${a}?`,
     choices: shuffle(stepBChoices),
-    explanationOnCorrect: `Undo multiplication by dividing both sides by ${a}.`,
+    explanationOnCorrect: stepBExplanation,
+  };
+
+  // ---------- Confirm the coefficient becomes 1 ----------
+  // A NEW line, not a continuation of the setup line above - so that
+  // setup stays visible permanently, and this becomes a new line below
+  // it. Fraction mode confirms the reciprocal MULTIPLICATION (matching
+  // the operation actually being performed there); decimal mode keeps
+  // the original plain a/a division question, since that's still the
+  // operation decimal mode actually performs.
+  const coeffConfirmedRow: GridRow = {
+    cells: assembleRow(finalExpr1, finalExpr2, BLANK, orientation),
+  };
+  let confirmPrompt: string;
+  let confirmExplanation: string;
+  let confirmDistractorCandidates: { text: string; tag: string }[];
+  if (mode === "fraction") {
+    confirmPrompt = `What is ${coefficientKatex} \u00d7 ${reciprocalKatex}?`;
+    confirmExplanation = `${coefficientKatex} and ${reciprocalKatex} are reciprocals, so ${coefficientKatex} \u00d7 ${reciprocalKatex} equals 1, so the variable is isolated.`;
+    confirmDistractorCandidates = [
+      { text: coefficientKatex, tag: "forgot_to_apply_operation" },
+      { text: "$0$", tag: "confuses_division_with_subtraction_pattern" },
+      { text: reciprocalKatex, tag: "left_answer_as_reciprocal" },
+    ];
+  } else {
+    confirmPrompt = `What is ${a} \u00f7 ${a}?`;
+    confirmExplanation = `The coefficient ${a} divided by itself is 1, so the variable is isolated.`;
+    confirmDistractorCandidates = [
+      { text: coefficientKatex, tag: "forgot_to_apply_operation" },
+      { text: "$0$", tag: "confuses_division_with_subtraction_pattern" },
+      { text: `$${-a}$`, tag: "sign_error" },
+    ];
+  }
+  const coeffConfirmDistractors = dedupNumeric("$1$", confirmDistractorCandidates);
+  const confirmCoefficientOne: SolverStep = {
+    stepId: "confirm_coefficient_one",
+    rowUpdates: [{ slotId: "coefficient_confirmed", row: coeffConfirmedRow }],
+    prompt: confirmPrompt,
+    choices: shuffle([
+      { text: "$1$", isCorrect: true, misconceptionTag: null },
+      { text: coeffConfirmDistractors[0].text, isCorrect: false, misconceptionTag: coeffConfirmDistractors[0].tag },
+      { text: coeffConfirmDistractors[1].text, isCorrect: false, misconceptionTag: coeffConfirmDistractors[1].tag },
+    ]),
+    explanationOnCorrect: confirmExplanation,
   };
 
   // ---- Step C: compute the final value, mode-appropriate distractors ----
@@ -265,7 +394,7 @@ export function buildNonIntegerSolverInstance(
 
   const stepC: SolverStep = {
     stepId: "compute_value",
-    rowUpdates: [{ slotId: "final", row: finalRow }],
+    rowUpdates: [{ slotId: "coefficient_confirmed", row: finalRow }],
     prompt: stepCPrompt,
     choices: shuffle(stepCChoices),
     explanationOnCorrect: `${variableSymbol} = ${renderPromptValue(solution, mode)}.`,
@@ -273,7 +402,7 @@ export function buildNonIntegerSolverInstance(
 
   return {
     initialRow,
-    steps: [stepA, stepB, stepC],
+    steps: [goalConstant, cancelConstant, combineConstant, stepB, confirmCoefficientOne, stepC],
     eqColumnIndex: eqColumnIndexFor(orientation),
     termAlign: "right",
   };

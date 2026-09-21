@@ -237,6 +237,25 @@ const MARKEDTERM_PREFIX = "MARKEDTERM:";
 const MARKEDFRACTION_PREFIX = "MARKEDFRACTION:";
 const MARKEDPARENFRACTION_PREFIX = "MARKEDPARENFRACTION:";
 const COEF_VAR_SEPARATOR = "\u0006";
+// "(left)(right)", both sides always real KaTeX - a reciprocal fraction
+// and the fraction-mode value it's multiplying never need the overline
+// treatment (only decimal mode's values can repeat, and decimal mode
+// uses a different technique entirely - see nonIntegerSolutions.ts).
+// Format: "PARENMULT:{left}\u0007{right}".
+const PARENMULT_PREFIX = "PARENMULT:";
+const PARENMULT_SEPARATOR = "\u0007";
+
+function renderParenMult(content: string, color: string): ReactNode {
+  const sepIdx = content.indexOf(PARENMULT_SEPARATOR);
+  if (sepIdx === -1) return renderTextWithEmbeddedNumbers(content);
+  const left = content.slice(0, sepIdx);
+  const right = content.slice(sepIdx + 1);
+  return (
+    <span style={{ color }}>
+      (<InlineMath math={left} />)(<InlineMath math={right} />)
+    </span>
+  );
+}
 
 // Two crossing diagonal lines over whatever's inside - used to show a
 // term or a fraction's numerator/denominator has been canceled out,
@@ -441,6 +460,7 @@ function Cell({ math, color, align = "center" }: { math: string; color: string; 
   const isMarkedTerm = math.startsWith(MARKEDTERM_PREFIX);
   const isMarkedFraction = math.startsWith(MARKEDFRACTION_PREFIX);
   const isMarkedParenFraction = math.startsWith(MARKEDPARENFRACTION_PREFIX);
+  const isParenMult = math.startsWith(PARENMULT_PREFIX);
   return (
     <div
       style={{
@@ -457,6 +477,8 @@ function Cell({ math, color, align = "center" }: { math: string; color: string; 
         renderMarkedFraction(math.slice(MARKEDFRACTION_PREFIX.length), color)
       ) : isMarkedParenFraction ? (
         renderMarkedParenFraction(math.slice(MARKEDPARENFRACTION_PREFIX.length), color)
+      ) : isParenMult ? (
+        renderParenMult(math.slice(PARENMULT_PREFIX.length), color)
       ) : isMarkedTerm ? (
         <XMark>
           <InlineMath math={math.slice(MARKEDTERM_PREFIX.length)} />
@@ -865,7 +887,8 @@ function EquationGrid({
           math.startsWith(STACKEDFRACTION_PREFIX) ||
           math.startsWith(MARKEDTERM_PREFIX) ||
           math.startsWith(MARKEDFRACTION_PREFIX) ||
-          math.startsWith(MARKEDPARENFRACTION_PREFIX)
+          math.startsWith(MARKEDPARENFRACTION_PREFIX) ||
+          math.startsWith(PARENMULT_PREFIX)
         )
           return math;
         return `\\boldsymbol{${math}}`;
