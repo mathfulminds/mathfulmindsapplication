@@ -51,7 +51,16 @@ function shuffle<T>(arr: T[]): T[] {
 
 export function buildSolverInstance(
   eq: EquationInstance,
-  variableSymbol: string = "x"
+  variableSymbol: string = "x",
+  // Which slot represents this equation's "current line" for marking
+  // purposes - defaults to "__initial__" for this skill's own direct
+  // use. multiStepEquationsCore.ts overrides this to whichever of its
+  // own slots ("distributed" or "combined") actually holds the current
+  // visible row by the time these steps begin delegating - "__initial__"
+  // there still holds the pre-distribute, original row, which never
+  // even has the terms being canceled if either side needed distributing
+  // or combining first. Same fix already made for twoStepEquations.ts.
+  initialSlotId: string = "__initial__"
 ): SolverInstance {
   const { aLeft, aRight, bLeft, bRight, solution } = eq;
   const x = variableSymbol;
@@ -61,6 +70,17 @@ export function buildSolverInstance(
       renderMultiplyTerm(aLeft, x),
       renderConstant(bLeft, true),
       renderMultiplyTerm(aRight, x),
+      renderConstant(bRight, true)
+    ),
+  };
+
+  // Marked variant - aRight's own term gets an x-mark once cancel1
+  // confirms the two opposites combine to 0, not before.
+  const initialRowMarked: GridRow = {
+    cells: assembleBothSides(
+      renderMultiplyTerm(aLeft, x),
+      renderConstant(bLeft, true),
+      `MARKEDTERM:${renderMultiplyTerm(aRight, x)}`,
       renderConstant(bRight, true)
     ),
   };
@@ -89,6 +109,10 @@ export function buildSolverInstance(
   const cancelVarDisplay = renderMultiplyTerm(-aRight, x, true, false);
   const cancelVarRow: GridRow = {
     cells: assembleBothSides(cancelVarDisplay, BLANK, cancelVarDisplay, BLANK, ""),
+  };
+  // Marked variant for the annotation's own opposite term.
+  const cancelVarRowMarked: GridRow = {
+    cells: assembleBothSides(cancelVarDisplay, BLANK, `MARKEDTERM:${cancelVarDisplay}`, BLANK, ""),
   };
 
   const aRightPositive = aRight >= 0;
@@ -129,10 +153,12 @@ export function buildSolverInstance(
 
   const cancel1: SolverStep = {
     stepId: "cancel_variable_term",
-    // The +5x / +5x annotation already appeared when the goal question
-    // above was answered - this step only tests the resulting arithmetic,
-    // it doesn't reveal anything new on the equation side.
-    rowUpdates: [],
+    // Both opposite variable terms get the x-mark together, once
+    // they're confirmed to combine to 0.
+    rowUpdates: [
+      { slotId: initialSlotId, row: initialRowMarked },
+      { slotId: "cancel_var_annotation", row: cancelVarRowMarked },
+    ],
     prompt: `What is ${opAbs}${x} ${opSym} ${opAbs}${x}?`,
     choices: shuffle([
       { text: cancel1Correct, isCorrect: true, misconceptionTag: null },
@@ -146,6 +172,18 @@ export function buildSolverInstance(
   // natural sign, not forced.
   const afterVarRow: GridRow = {
     cells: assembleBothSides(renderMultiplyTerm(newA, x), renderConstant(bLeft, true), BLANK, renderConstant(bRight)),
+  };
+  // Marked variant - bLeft's own term gets an x-mark once cancel2
+  // confirms the two opposites combine to 0, not before. Marks
+  // "after_var_elim" (not "__initial__"), since combine1 already made
+  // that the current visible line by this point.
+  const afterVarRowMarked: GridRow = {
+    cells: assembleBothSides(
+      renderMultiplyTerm(newA, x),
+      `MARKEDTERM:${renderConstant(bLeft, true)}`,
+      BLANK,
+      renderConstant(bRight)
+    ),
   };
 
   const combine1Correct = plainTerm(newA, x);
@@ -177,6 +215,10 @@ export function buildSolverInstance(
   const cancelConstDisplay = renderConstant(-bLeft, true, false);
   const cancelConstRow: GridRow = {
     cells: assembleBothSides(BLANK, cancelConstDisplay, BLANK, cancelConstDisplay, ""),
+  };
+  // Marked variant for the annotation's own opposite constant.
+  const cancelConstRowMarked: GridRow = {
+    cells: assembleBothSides(BLANK, `MARKEDTERM:${cancelConstDisplay}`, BLANK, cancelConstDisplay, ""),
   };
 
   const bLeftPositive = bLeft >= 0;
@@ -219,9 +261,12 @@ export function buildSolverInstance(
 
   const cancel2: SolverStep = {
     stepId: "cancel_constant",
-    // Same as the variable phase: the annotation already appeared when
-    // the goal question above was answered.
-    rowUpdates: [],
+    // Both opposite constants get the x-mark together, once they're
+    // confirmed to combine to 0.
+    rowUpdates: [
+      { slotId: "after_var_elim", row: afterVarRowMarked },
+      { slotId: "cancel_const_annotation", row: cancelConstRowMarked },
+    ],
     prompt: `What is ${op2Abs} ${op2Sym} ${op2Abs}?`,
     choices: shuffle([
       { text: cancel2Correct, isCorrect: true, misconceptionTag: null },
@@ -272,6 +317,14 @@ export function buildSolverInstance(
   const divRhs = `\\dfrac{${newRhs}}{${newA}}`;
   const divRow: GridRow = {
     cells: assembleBothSides(divSetup, BLANK, BLANK, divRhs),
+  };
+  // Marked variant - same MARKEDFRACTION technique used everywhere else
+  // for this divide-form case: the coefficient and its own copy in the
+  // denominator are the canceling pair, marked together once
+  // confirm_coefficient_one confirms it, not before.
+  const divSetupMarked = `MARKEDFRACTION:${newA}\u0006${x}\u0005${newA}`;
+  const divRowMarked: GridRow = {
+    cells: assembleBothSides(divSetupMarked, BLANK, BLANK, divRhs),
   };
 
   const step3Choices: Choice[] =
@@ -334,7 +387,14 @@ export function buildSolverInstance(
 
   const confirmCoefficientOne: SolverStep = {
     stepId: "confirm_coefficient_one",
-    rowUpdates: [{ slotId: "coefficient_confirmed", row: coeffConfirmedRow }],
+    // Updates BOTH "after_const_elim" (adding the x-marks, now that the
+    // coefficient is actually confirmed to cancel) and
+    // "coefficient_confirmed" (the new line showing the isolated
+    // variable).
+    rowUpdates: [
+      { slotId: "after_const_elim", row: divRowMarked },
+      { slotId: "coefficient_confirmed", row: coeffConfirmedRow },
+    ],
     prompt: `What is ${newA} \u00f7 ${newA}?`,
     choices: shuffle([
       { text: "1", isCorrect: true, misconceptionTag: null },

@@ -492,18 +492,34 @@ function renderStackedFraction(content: string, color: string): ReactNode {
   );
 }
 
+// Forces this ONE cell's text-align to "left", overriding the global
+// termAlign setting - for a specific term that needs to render flush
+// against the left edge of its own column (e.g. a distributed term that
+// should sit directly under the original parenthetical expression it
+// came from), regardless of how wide some OTHER row sharing that same
+// column happens to be. Solves the same problem \mathrlap+\phantom
+// attempted (matching a specific sibling's width), but robustly: it
+// doesn't depend on knowing the widest sibling across the whole
+// problem's lifecycle in advance, which \mathrlap+\phantom could never
+// fully guarantee (a later row, like a division-bar setup, can still
+// be wider than whatever single width was phantom-matched).
+const LEFTALIGN_PREFIX = "LEFTALIGN:";
+
 function Cell({ math, color, align = "center" }: { math: string; color: string; align?: "center" | "right" }) {
-  const isPlainText = math.startsWith(PLAINTEXT_PREFIX);
-  const isStackedFraction = math.startsWith(STACKEDFRACTION_PREFIX);
-  const isMarkedTerm = math.startsWith(MARKEDTERM_PREFIX);
-  const isMarkedFraction = math.startsWith(MARKEDFRACTION_PREFIX);
-  const isMarkedParenFraction = math.startsWith(MARKEDPARENFRACTION_PREFIX);
-  const isParenMult = math.startsWith(PARENMULT_PREFIX);
-  const isMarkedParenMult = math.startsWith(MARKEDPARENMULT_PREFIX);
+  const isLeftAlign = math.startsWith(LEFTALIGN_PREFIX);
+  const content = isLeftAlign ? math.slice(LEFTALIGN_PREFIX.length) : math;
+  const isPlainText = content.startsWith(PLAINTEXT_PREFIX);
+  const isStackedFraction = content.startsWith(STACKEDFRACTION_PREFIX);
+  const isMarkedTerm = content.startsWith(MARKEDTERM_PREFIX);
+  const isMarkedFraction = content.startsWith(MARKEDFRACTION_PREFIX);
+  const isMarkedParenFraction = content.startsWith(MARKEDPARENFRACTION_PREFIX);
+  const isParenMult = content.startsWith(PARENMULT_PREFIX);
+  const isMarkedParenMult = content.startsWith(MARKEDPARENMULT_PREFIX);
+  const math_ = content;
   return (
     <div
       style={{
-        textAlign: align,
+        textAlign: isLeftAlign ? "left" : align,
         color,
         overflow: "visible",
         lineHeight: 1.8,
@@ -511,18 +527,18 @@ function Cell({ math, color, align = "center" }: { math: string; color: string; 
       }}
     >
       {isStackedFraction ? (
-        renderStackedFraction(math.slice(STACKEDFRACTION_PREFIX.length), color)
+        renderStackedFraction(math_.slice(STACKEDFRACTION_PREFIX.length), color)
       ) : isMarkedFraction ? (
-        renderMarkedFraction(math.slice(MARKEDFRACTION_PREFIX.length), color)
+        renderMarkedFraction(math_.slice(MARKEDFRACTION_PREFIX.length), color)
       ) : isMarkedParenFraction ? (
-        renderMarkedParenFraction(math.slice(MARKEDPARENFRACTION_PREFIX.length), color)
+        renderMarkedParenFraction(math_.slice(MARKEDPARENFRACTION_PREFIX.length), color)
       ) : isMarkedParenMult ? (
-        renderMarkedParenMult(math.slice(MARKEDPARENMULT_PREFIX.length), color)
+        renderMarkedParenMult(math_.slice(MARKEDPARENMULT_PREFIX.length), color)
       ) : isParenMult ? (
-        renderParenMult(math.slice(PARENMULT_PREFIX.length), color)
+        renderParenMult(math_.slice(PARENMULT_PREFIX.length), color)
       ) : isMarkedTerm ? (
         <XMark>
-          {math.slice(MARKEDTERM_PREFIX.length).startsWith(PLAINTEXT_PREFIX) ? (
+          {math_.slice(MARKEDTERM_PREFIX.length).startsWith(PLAINTEXT_PREFIX) ? (
             // The marked term can itself be a decimal-mode value that
             // repeats (e.g. a constant b whose fraction form has one of
             // the repeating-decimal denominators) - detect the nested
@@ -530,15 +546,15 @@ function Cell({ math, color, align = "center" }: { math: string; color: string; 
             // with-overline path PLAINTEXT_PREFIX itself uses, rather
             // than passing it to InlineMath/KaTeX, which doesn't
             // understand this prefix or the overline markers at all.
-            renderTextWithEmbeddedNumbers(math.slice(MARKEDTERM_PREFIX.length + PLAINTEXT_PREFIX.length))
+            renderTextWithEmbeddedNumbers(math_.slice(MARKEDTERM_PREFIX.length + PLAINTEXT_PREFIX.length))
           ) : (
-            <InlineMath math={math.slice(MARKEDTERM_PREFIX.length)} />
+            <InlineMath math={math_.slice(MARKEDTERM_PREFIX.length)} />
           )}
         </XMark>
       ) : isPlainText ? (
-        renderTextWithEmbeddedNumbers(math.slice(PLAINTEXT_PREFIX.length))
+        renderTextWithEmbeddedNumbers(math_.slice(PLAINTEXT_PREFIX.length))
       ) : (
-        <InlineMath math={math} />
+        <InlineMath math={math_} />
       )}
     </div>
   );
@@ -692,6 +708,7 @@ function DistributeDiagram({
   suffix,
   suffixColor,
   parenColor,
+  forcePaddingTop,
 }: {
   coefficient: string;
   term1: string;
@@ -702,6 +719,14 @@ function DistributeDiagram({
   suffix?: string;
   suffixColor?: string;
   parenColor?: string;
+  // Overrides this diagram's own arcsShown-based padding - needed when
+  // TWO diagrams share the same row (a left-side and a right-side one,
+  // both simultaneously visible): each computes arcsShown independently
+  // for ITS OWN arcs, so without this, the one further behind pads
+  // less, and its text sits at a different baseline than the other -
+  // the whole row needs the same padding as whichever diagram (or
+  // neither) currently has the most arcs shown.
+  forcePaddingTop?: number;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const coefRef = useRef<HTMLSpanElement | null>(null);
@@ -723,6 +748,10 @@ function DistributeDiagram({
   // shown), which shifts the text's actual Y position in the DOM. Without
   // re-measuring here, the arc math keeps using the stale pre-padding Y
   // coordinate, drawing arcs disconnected from where the text now sits.
+  // forcePaddingTop is the same reasoning, one level removed: when a
+  // sibling diagram on the same row forces this one's padding to match
+  // its own (larger) value, that ALSO shifts this text's actual Y
+  // position, even though this diagram's own arcsShown didn't change.
   useLayoutEffect(() => {
     if (!containerRef.current || !coefRef.current || !term1Ref.current || !term2Ref.current) {
       setMeasured(null);
@@ -738,7 +767,7 @@ function DistributeDiagram({
       term2X: term2Rect.left + term2Rect.width / 2 - containerRect.left,
       y: coefRect.top - containerRect.top,
     });
-  }, [coefficient, term1, term2, arcsShown]);
+  }, [coefficient, term1, term2, arcsShown, forcePaddingTop]);
 
   const arcGap = 10;
   let arc1Path = "";
@@ -764,7 +793,11 @@ function DistributeDiagram({
   return (
     <div
       ref={containerRef}
-      style={{ position: "relative", display: "inline-block", paddingTop: arcsShown > 0 ? 34 : 0 }}
+      style={{
+        position: "relative",
+        display: "inline-block",
+        paddingTop: forcePaddingTop !== undefined ? forcePaddingTop : arcsShown > 0 ? 34 : 0,
+      }}
     >
       {measured && (
         <svg
@@ -860,7 +893,7 @@ function EquationGrid({
   boldSlotId,
   eqColumnIndex,
   columnCount,
-  distributeAnnotation,
+  distributeAnnotations,
   eq1Annotation,
   eq2Annotation,
   termAlign,
@@ -875,7 +908,7 @@ function EquationGrid({
   boldSlotId?: string | null;
   eqColumnIndex: number;
   columnCount?: number;
-  distributeAnnotation?: ComputedAnnotation;
+  distributeAnnotations?: ComputedAnnotation[];
   eq1Annotation?: ComputedAnnotation;
   eq2Annotation?: ComputedAnnotation;
   termAlign?: "right";
@@ -941,7 +974,8 @@ function EquationGrid({
           math.startsWith(MARKEDFRACTION_PREFIX) ||
           math.startsWith(MARKEDPARENFRACTION_PREFIX) ||
           math.startsWith(MARKEDPARENMULT_PREFIX) ||
-          math.startsWith(PARENMULT_PREFIX)
+          math.startsWith(PARENMULT_PREFIX) ||
+          math.startsWith(LEFTALIGN_PREFIX)
         )
           return math;
         return `\\boldsymbol{${math}}`;
@@ -986,17 +1020,34 @@ function EquationGrid({
         cells: readonly string[],
         rowKey: string,
         color: string,
-        annotation: ComputedAnnotation | undefined,
+        annotations: ComputedAnnotation[],
         slotIdForRow: string | undefined,
         marginBottom?: number
       ) {
-        if (!annotation) return renderCells(cells, rowKey, color, slotIdForRow, marginBottom);
-        const [startCol] = [...annotation.termCols].sort((a, b) => a - b);
+        if (annotations.length === 0) return renderCells(cells, rowKey, color, slotIdForRow, marginBottom);
+        // Multiple annotations can be simultaneously active on the same
+        // row now (e.g. both a left-side and a right-side distribute
+        // diagram, once each has started) - each one still spans its
+        // own two term columns independently, keyed by its own
+        // termCols, rather than only ever one being shown at a time.
+        const spanStartCols = new Set(annotations.map((a) => Math.min(...a.termCols)));
+        const spanAbsorbedCols = new Set(annotations.map((a) => Math.min(...a.termCols) + 1));
+        // The "=" column's own padding needs to match whichever
+        // diagram(s) currently have at least one arc visible - if ANY
+        // of them do, this row's baseline has already shifted down by
+        // 34px, and every other cell in the row (including this one)
+        // needs the same shift to stay aligned with it.
+        const anyArcsShown = annotations.some((a) => a.arcsShown > 0);
         return cells.map((cellValue, colIndex) => {
           const style = marginBottom !== undefined ? { marginBottom } : undefined;
-          if (colIndex === startCol) {
+          if (spanStartCols.has(colIndex)) {
+            const annotation = annotations.find((a) => Math.min(...a.termCols) === colIndex)!;
             return (
-              <div key={`${rowKey}-${colIndex}`} data-row-slot={slotIdForRow} style={{ gridColumn: `${startCol + 1} / span 2`, ...style }}>
+              <div
+                key={`${rowKey}-${colIndex}`}
+                data-row-slot={slotIdForRow}
+                style={{ gridColumn: `${colIndex + 1} / span 2`, ...style }}
+              >
                 <DistributeDiagram
                   coefficient={annotation.coefficient}
                   term1={annotation.term1}
@@ -1007,16 +1058,17 @@ function EquationGrid({
                   suffix={annotation.suffix}
                   suffixColor={annotation.suffixColor}
                   parenColor={color}
+                  forcePaddingTop={anyArcsShown ? 34 : 0}
                 />
               </div>
             );
           }
-          if (colIndex === startCol + 1) return null; // absorbed into the spanning cell above
+          if (spanAbsorbedCols.has(colIndex)) return null; // absorbed into the spanning cell above
           // Matches DistributeDiagram's own paddingTop exactly (0 before
           // any arc is shown, 34 once one is), so these cells sit at the
           // same baseline as the equation text inside the spanning cell,
           // instead of the two falling out of alignment with each other.
-          const paddedStyle = { paddingTop: annotation.arcsShown > 0 ? 34 : 0, ...style };
+          const paddedStyle = { paddingTop: anyArcsShown ? 34 : 0, ...style };
           return colIndex === eqColumnIndex ? (
             <div key={`${rowKey}-${colIndex}`} data-row-slot={slotIdForRow} style={paddedStyle}>
               <div style={{ textAlign: "center", color: "var(--ink-soft)", fontSize: 18, whiteSpace: "nowrap" }}>
@@ -1064,22 +1116,26 @@ function EquationGrid({
         }
 
         return [
-          ...renderCellsOrArrow(row.eq1, `${rowIndex}-eq1`, colorFor(row.eq1Highlight), eq1Ann, slotId, -8),
-          ...renderCellsOrArrow(row.eq2, `${rowIndex}-eq2`, colorFor(row.eq2Highlight), eq2Ann, slotId),
+          ...renderCellsOrArrow(row.eq1, `${rowIndex}-eq1`, colorFor(row.eq1Highlight), eq1Ann ? [eq1Ann] : [], slotId, -8),
+          ...renderCellsOrArrow(row.eq2, `${rowIndex}-eq2`, colorFor(row.eq2Highlight), eq2Ann ? [eq2Ann] : [], slotId),
         ];
       }
 
       const color = colorFor(row.highlight);
-      // The row whose slot id matches the annotation's targetSlotId gets
-      // its two term columns merged into one spanning cell containing
-      // the arrow diagram - this is what makes the arrow sit directly on
-      // the actual equation line it belongs to, wherever that row
-      // happens to be (and whichever track it's in), instead of always
-      // landing on row 0 regardless of which row it was meant for.
-      // Defaults to "__initial__" (row 0) for skills that never set
-      // targetSlotId, preserving existing behavior exactly.
-      const singleAnnotation = distributeAnnotation?.targetSlotId === slotId ? distributeAnnotation : undefined;
-      return renderCellsOrArrow(row.cells, `${rowIndex}`, color, singleAnnotation, slotId, row.marginBottom);
+      // The row whose slot id matches an annotation's targetSlotId gets
+      // that annotation's two term columns merged into one spanning cell
+      // containing the arrow diagram - this is what makes the arrow sit
+      // directly on the actual equation line it belongs to, wherever
+      // that row happens to be (and whichever track it's in), instead of
+      // always landing on row 0 regardless of which row it was meant
+      // for. Defaults to "__initial__" (row 0) for skills that never set
+      // targetSlotId, preserving existing behavior exactly. More than
+      // one annotation can match the SAME row now (e.g. a left-side and
+      // a right-side distribute diagram both belonging on row 0) -
+      // renderCellsOrArrow renders each independently, at its own
+      // column span.
+      const matchingAnnotations = (distributeAnnotations ?? []).filter((a) => a.targetSlotId === slotId);
+      return renderCellsOrArrow(row.cells, `${rowIndex}`, color, matchingAnnotations, slotId, row.marginBottom);
     });
   }
 
@@ -1380,13 +1436,36 @@ export default function StepSolver({
     };
   }
 
+  // Collects EVERY distinct distributeVisual the student has reached so
+  // far (by index <= stepIndex), not just the most recent one - this is
+  // what lets both a left-side arc and a right-side arc stay
+  // simultaneously visible once each has started, rather than the
+  // second one replacing the first. Deduplicates by object identity,
+  // since both of a side's own two distribute steps share the exact
+  // same distributeVisual object. Falls back to the first one in the
+  // whole array before any distribute step is reached at all, so the
+  // diagram's empty state still shows from the very start, matching
+  // every single-arc skill's existing behavior.
+  function findAllActiveDistributeContents(steps: SolverStep[]): DistributeVisual[] {
+    const seen = new Set<DistributeVisual>();
+    for (let i = 0; i <= stepIndex && i < steps.length; i++) {
+      const dv = steps[i].distributeVisual;
+      if (dv && !dv.equation) seen.add(dv);
+    }
+    if (seen.size > 0) return [...seen];
+    const first = steps.find((s) => s.distributeVisual && !s.distributeVisual.equation)?.distributeVisual;
+    return first ? [first] : [];
+  }
+
   const eq1DistributeContent = instance.steps.find((s) => s.distributeVisual?.equation === "eq1")?.distributeVisual;
   const eq2DistributeContent = instance.steps.find((s) => s.distributeVisual?.equation === "eq2")?.distributeVisual;
-  const singleDistributeContent = instance.steps.find((s) => s.distributeVisual && !s.distributeVisual.equation)?.distributeVisual;
+  const activeDistributeContents = findAllActiveDistributeContents(instance.steps);
 
   const eq1Annotation = eq1DistributeContent ? computeAnnotation(eq1DistributeContent, instance.steps, instance.eqColumnIndex) : undefined;
   const eq2Annotation = eq2DistributeContent ? computeAnnotation(eq2DistributeContent, instance.steps, instance.eqColumnIndex) : undefined;
-  const distributeAnnotation = singleDistributeContent ? computeAnnotation(singleDistributeContent, instance.steps, instance.eqColumnIndex) : undefined;
+  const distributeAnnotations = activeDistributeContents
+    .map((content) => computeAnnotation(content, instance.steps, instance.eqColumnIndex))
+    .filter((a): a is ComputedAnnotation => a !== undefined);
 
   function handleChoice(i: number) {
     if (revealed) return;
@@ -1496,7 +1575,7 @@ export default function StepSolver({
           slotIds={slotOrder}
           eqColumnIndex={instance.eqColumnIndex}
           columnCount={instance.columnCount}
-          distributeAnnotation={distributeAnnotation}
+          distributeAnnotations={distributeAnnotations}
           eq1Annotation={eq1Annotation}
           eq2Annotation={eq2Annotation}
           termAlign={instance.termAlign}
