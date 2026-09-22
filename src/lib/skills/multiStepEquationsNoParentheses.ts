@@ -341,6 +341,22 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
   const leftCombine = computeCombine(leftSide, "x") ?? computeCombine(leftSide, "const");
   const rightCombine = computeCombine(rightSide, "x") ?? computeCombine(rightSide, "const");
 
+  // Look-ahead: will the isolate phase below end up completely empty?
+  // Only possible in Case B (the variable appears on just one side) when
+  // that side is bare "x" (coefficient already 1, no constant to
+  // eliminate) - then there's no cancel_constant/combine_constant step
+  // AND no division phase either, so combine_left/combine_right (built
+  // right below, long before Case B's own branching is even reached)
+  // ends up being the genuinely final step of the whole problem, and
+  // needs the same highlight/wording treatment every other "coefficient
+  // already 1" final step gets elsewhere in this file.
+  const isolatePhaseWillBeEmpty = (() => {
+    if (aLeft !== 0 && aRight !== 0) return false; // bothHaveX always has at least combine_variable_term
+    const coef = aLeft !== 0 ? aLeft : aRight;
+    const bOnVarSide = aLeft !== 0 ? bLeft : bRight;
+    return coef === 1 && bOnVarSide === 0;
+  })();
+
   // Both combine steps target the SAME shared line - left combining first
   // (right shown blank if it still has its own pending reveal, or shown
   // immediately if it needs no work), then right combining fills in what
@@ -354,12 +370,36 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
         : buildCombineConstStepN(leftCombine.values, "left");
     const revealLeftCells = applyCombine(leftInitialCells, leftCombine);
     const revealRightCells = rightCombine ? rightInitialCells.map(() => BLANK) : rightInitialCells;
+    // When right doesn't need its own combine step, this reveal ALREADY
+    // brings the whole equation down at once (revealRightCells is
+    // rightInitialCells, not blank) - "the rest of the left side" would
+    // be misleading there, since the right side is appearing here too,
+    // not staying hidden for a later step.
+    const isLeftLastCombine = !rightCombine;
+    // On top of that: if the isolate phase below will end up completely
+    // empty too (Case B's bare-x edge case), this reveal is ALSO the
+    // genuinely final step of the whole problem, not just the whole
+    // equation mid-solve - needs the same highlight/wording treatment
+    // every other "coefficient already 1" final step gets.
+    const isGenuineFinalStep = isLeftLastCombine && isolatePhaseWillBeEmpty;
     steps.push({
       stepId: "combine_left",
-      rowUpdates: [{ slotId: combinedRowSlot, row: { cells: [...revealLeftCells, "=", ...revealRightCells] } }],
+      rowUpdates: [
+        {
+          slotId: combinedRowSlot,
+          row: {
+            cells: [...revealLeftCells, "=", ...revealRightCells],
+            ...(isGenuineFinalStep ? { highlight: "success" as const } : {}),
+          },
+        },
+      ],
       prompt: info.prompt,
       choices: info.choices,
-      explanationOnCorrect: `${info.explanation} The rest of the left side of the equation gets brought down unchanged.`,
+      explanationOnCorrect: isGenuineFinalStep
+        ? `${info.explanation} Since the coefficient of ${x} is already 1, this is the final answer: ${x} = ${solution}.`
+        : isLeftLastCombine
+        ? `${info.explanation} The rest of the equation gets brought down unchanged.`
+        : `${info.explanation} The rest of the left side of the equation gets brought down unchanged.`,
     });
   }
 
@@ -370,12 +410,33 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
         : buildCombineConstStepN(rightCombine.values, "right");
     const currentLeftCells = leftCombine ? applyCombine(leftInitialCells, leftCombine) : leftInitialCells;
     const revealRightCells = applyCombine(rightInitialCells, rightCombine);
+    // When left never needed its own combine step, left has never
+    // appeared on "combined_row" before now - this reveal is the first
+    // time both sides show together, so it's genuinely the whole
+    // equation, not just "the rest of the right side".
+    const isRightFirstReveal = !leftCombine;
+    // combine_right, whenever it fires, is always the last combine step
+    // overall - so isolatePhaseWillBeEmpty alone determines whether it's
+    // ALSO the genuinely final step of the whole problem.
+    const isGenuineFinalStep = isolatePhaseWillBeEmpty;
     steps.push({
       stepId: "combine_right",
-      rowUpdates: [{ slotId: combinedRowSlot, row: { cells: [...currentLeftCells, "=", ...revealRightCells] } }],
+      rowUpdates: [
+        {
+          slotId: combinedRowSlot,
+          row: {
+            cells: [...currentLeftCells, "=", ...revealRightCells],
+            ...(isGenuineFinalStep ? { highlight: "success" as const } : {}),
+          },
+        },
+      ],
       prompt: info.prompt,
       choices: info.choices,
-      explanationOnCorrect: `${info.explanation} The rest of the right side of the equation gets brought down unchanged.`,
+      explanationOnCorrect: isGenuineFinalStep
+        ? `${info.explanation} Since the coefficient of ${x} is already 1, this is the final answer: ${x} = ${solution}.`
+        : isRightFirstReveal
+        ? `${info.explanation} The rest of the equation gets brought down unchanged.`
+        : `${info.explanation} The rest of the right side of the equation gets brought down unchanged.`,
     });
   }
 
@@ -441,9 +502,41 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
     const newA = aLeft - aRight;
     const aRightPositive = aRight >= 0;
 
+    // If the combined coefficient is already 1, dividing by it is a
+    // no-op - "x = value" is already fully solved the moment that row
+    // appears, so whichever step reveals it becomes the final step
+    // instead of continuing into a redundant "divide by 1" / "confirm
+    // 1 / 1 = 1" pair. A coefficient of -1 still needs the divide phase
+    // - flipping every sign is a real operation, not a no-op, even
+    // though the magnitude is also 1. Same principle already
+    // established in variablesBothSides.ts and combiningLikeTerms.ts.
+    const needsDivide = newA !== 1;
+
     const cancelVarDisplay1 = renderMultiplyTerm(-aRight, x, true, !isLeadingCol(leftXCol));
     const cancelVarDisplay2 = renderMultiplyTerm(-aRight, x, true, !isLeadingCol(rightXCol));
     const cancelRow1 = minimalRow({ col: leftXCol, value: cancelVarDisplay1 }, { col: rightXCol, value: cancelVarDisplay2 });
+    // Marked variant for the annotation's own opposite term - only the
+    // rightXCol position (the one directly pairing with the initial
+    // row's own aRight*x term), not leftXCol (which is just the same
+    // operation applied to the other side, same convention already
+    // established in variablesBothSides.ts).
+    const cancelRow1Marked = minimalRow(
+      { col: leftXCol, value: cancelVarDisplay1 },
+      { col: rightXCol, value: `MARKEDTERM:${cancelVarDisplay2}` }
+    );
+    // Marked variant of the CURRENT line - the right side's own
+    // variable term gets an x-mark once cancel_variable_term confirms
+    // the two opposites combine to 0, not before. Uses `working` (which
+    // already reflects the post-combine state, if combine_left/
+    // combine_right fired) rather than the stale initial row - and
+    // targets whichever slot actually holds the current line: if either
+    // side needed combining, that's "combined_row"; otherwise nothing
+    // else has touched the equation yet, so it's still "__initial__".
+    // Same slot-mismatch bug already caught once before in
+    // multiStepEquationsCore.ts and variablesBothSides.ts.
+    const currentSlotForCancelVar = leftCombine || rightCombine ? "combined_row" : "__initial__";
+    const currentLineMarkedForVar = [...working];
+    if (rightXCol !== null) currentLineMarkedForVar[rightXCol] = `MARKEDTERM:${working[rightXCol]}`;
 
     steps.push({
       stepId: "goal_variable_left",
@@ -480,7 +573,12 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
     ]);
     steps.push({
       stepId: "cancel_variable_term",
-      rowUpdates: [],
+      // Both opposite variable terms get the x-mark together, once
+      // they're confirmed to combine to 0.
+      rowUpdates: [
+        { slotId: currentSlotForCancelVar, row: { cells: currentLineMarkedForVar } },
+        { slotId: "cancel_var_annotation", row: { cells: cancelRow1Marked } },
+      ],
       prompt: `What is ${plainAbsTerm(opAbs, x)} ${opSym} ${plainAbsTerm(opAbs, x)}?`,
       choices: shuffle([
         { text: "0", isCorrect: true, misconceptionTag: null },
@@ -493,9 +591,19 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
     working = [...working];
     setCol(working, leftXCol, renderMultiplyTerm(newA, x, leftXCol !== 0));
     blankCol(working, rightXCol);
+    // Becomes the final step directly when there's no constant phase
+    // left to run (bLeft === 0) AND the coefficient is already 1 - both
+    // conditions have to hold, since bLeft !== 0 still has its own
+    // combine_constant step coming up as the genuine final step instead.
+    const isCombineVarFinal = bLeft === 0 && !needsDivide;
     steps.push({
       stepId: "combine_variable_term",
-      rowUpdates: [{ slotId: "after_var_elim", row: { cells: working } }],
+      rowUpdates: [
+        {
+          slotId: "after_var_elim",
+          row: { cells: working, ...(isCombineVarFinal ? { highlight: "success" as const } : {}) },
+        },
+      ],
       prompt: `What is ${plainTerm(aLeft, x)} ${opSym} ${plainAbsTerm(opAbs, x)}?`,
       choices: (() => {
         const combine1FlipValue = opSym === "-" ? aLeft + opAbs : aLeft - opAbs;
@@ -510,7 +618,13 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
           { text: d[1].text, isCorrect: false, misconceptionTag: d[1].tag },
         ]);
       })(),
-      explanationOnCorrect: `The terms combine to ${plainTerm(newA, x)}.${impliedCoefficientNote(aLeft, -aRight, x)} The rest of the equation gets brought down unchanged.`,
+      explanationOnCorrect: isCombineVarFinal
+        ? `The terms combine to ${plainTerm(newA, x)}.${impliedCoefficientNote(
+            aLeft,
+            -aRight,
+            x
+          )} Since the coefficient of ${x} is already 1, this is the final answer: ${x} = ${bRight}.`
+        : `The terms combine to ${plainTerm(newA, x)}.${impliedCoefficientNote(aLeft, -aRight, x)} The rest of the equation gets brought down unchanged.`,
     });
 
     let newRhs = bRight;
@@ -527,6 +641,22 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
         { col: leftConstCol, value: cancelConstDisplay1 },
         { col: rightConstCol, value: cancelConstDisplay2 }
       );
+      // Marked variant for the annotation's own opposite constant - only
+      // leftConstCol (the position directly pairing with the current
+      // line's own bLeft constant), matching the same asymmetric
+      // convention as cancel_variable_term above.
+      const cancelRow2Marked = minimalRow(
+        { col: leftConstCol, value: `MARKEDTERM:${cancelConstDisplay1}` },
+        { col: rightConstCol, value: cancelConstDisplay2 }
+      );
+      // Marked variant of the current line - bLeft's own term gets an
+      // x-mark once cancel_constant confirms the two opposites combine
+      // to 0, not before. Marks "after_var_elim" (the working array as
+      // it currently stands, from combine_variable_term's own reveal),
+      // not "__initial__", since that's the current visible line by
+      // this point.
+      const afterVarElimMarked = [...working];
+      if (leftConstCol !== null) afterVarElimMarked[leftConstCol] = `MARKEDTERM:${working[leftConstCol]}`;
 
       steps.push({
         stepId: "goal_constant_right",
@@ -558,7 +688,12 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
       ]);
       steps.push({
         stepId: "cancel_constant",
-        rowUpdates: [],
+        // Both opposite constants get the x-mark together, once they're
+        // confirmed to combine to 0.
+        rowUpdates: [
+          { slotId: "after_var_elim", row: { cells: afterVarElimMarked } },
+          { slotId: "cancel_const_annotation", row: { cells: cancelRow2Marked } },
+        ],
         prompt: `What is ${op2Abs} ${op2Sym} ${op2Abs}?`,
         choices: shuffle([
           { text: "0", isCorrect: true, misconceptionTag: null },
@@ -584,120 +719,143 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
       ]);
       steps.push({
         stepId: "combine_constant",
-        rowUpdates: [{ slotId: "after_const_elim", row: { cells: working } }],
+        rowUpdates: [
+          {
+            slotId: "after_const_elim",
+            row: { cells: working, ...(needsDivide ? {} : { highlight: "success" as const }) },
+          },
+        ],
         prompt: `What is ${bRight} ${op2Sym} ${op2Abs}?`,
         choices: shuffle([
           { text: `${newRhs}`, isCorrect: true, misconceptionTag: null },
           { text: combine2Distractors[0].text, isCorrect: false, misconceptionTag: combine2Distractors[0].tag },
           { text: combine2Distractors[1].text, isCorrect: false, misconceptionTag: combine2Distractors[1].tag },
         ]),
-        explanationOnCorrect: `The terms combine to ${newRhs}. The rest of the equation gets brought down unchanged.`,
+        explanationOnCorrect: needsDivide
+          ? `The terms combine to ${newRhs}. The rest of the equation gets brought down unchanged.`
+          : `The terms combine to ${newRhs}. Since the coefficient of ${x} is already 1, this is the final answer: ${x} = ${newRhs}.`,
       });
 
       divideSlotId = "after_const_elim";
     }
 
-    const divSetup = `\\dfrac{${renderMultiplyTerm(newA, x)}}{${newA}}`;
-    const divRhs = `\\dfrac{${newRhs}}{${newA}}`;
-    working = [...working];
-    setCol(working, leftXCol, divSetup);
-    setCol(working, rightConstCol, divRhs);
-    steps.push({
-      stepId: "eliminate_coefficient",
-      rowUpdates: [{ slotId: divideSlotId, row: { cells: working } }],
-      prompt: `What undoes multiplying ${x} by ${newA}?`,
-      choices: (() => {
-        const collision = Math.abs(bLeft) === newA;
-        return shuffle(
-          collision
-            ? [
-                { text: `Dividing both sides by ${newA}`, isCorrect: true, misconceptionTag: null },
-                {
-                  text: `Multiplying both sides by ${newA}`,
-                  isCorrect: false,
-                  misconceptionTag: "confuses_additive_and_multiplicative_inverse",
-                },
-                {
-                  text: `Adding ${Math.abs(newA)} to both sides`,
-                  isCorrect: false,
-                  misconceptionTag: "confuses_additive_and_multiplicative_inverse",
-                },
-              ]
-            : [
-                { text: `Dividing both sides by ${newA}`, isCorrect: true, misconceptionTag: null },
-                {
-                  text: `Multiplying both sides by ${newA}`,
-                  isCorrect: false,
-                  misconceptionTag: "confuses_additive_and_multiplicative_inverse",
-                },
-                {
-                  text: `Dividing both sides by ${Math.abs(bLeft)}`,
-                  isCorrect: false,
-                  misconceptionTag: "targets_wrong_term_first",
-                },
-              ]
-        );
-      })(),
-      explanationOnCorrect: `The coefficient ${newA} cancels when you divide both sides by ${newA}.`,
-    });
+    if (needsDivide) {
+        const divSetup = `\\dfrac{${renderMultiplyTerm(newA, x)}}{${newA}}`;
+        const divRhs = `\\dfrac{${newRhs}}{${newA}}`;
+        working = [...working];
+        setCol(working, leftXCol, divSetup);
+        setCol(working, rightConstCol, divRhs);
+      steps.push({
+        stepId: "eliminate_coefficient",
+        rowUpdates: [{ slotId: divideSlotId, row: { cells: working } }],
+        prompt: `What undoes multiplying ${x} by ${newA}?`,
+        choices: (() => {
+          const collision = Math.abs(bLeft) === newA;
+          return shuffle(
+            collision
+              ? [
+                  { text: `Dividing both sides by ${newA}`, isCorrect: true, misconceptionTag: null },
+                  {
+                    text: `Multiplying both sides by ${newA}`,
+                    isCorrect: false,
+                    misconceptionTag: "confuses_additive_and_multiplicative_inverse",
+                  },
+                  {
+                    text: `Adding ${Math.abs(newA)} to both sides`,
+                    isCorrect: false,
+                    misconceptionTag: "confuses_additive_and_multiplicative_inverse",
+                  },
+                ]
+              : [
+                  { text: `Dividing both sides by ${newA}`, isCorrect: true, misconceptionTag: null },
+                  {
+                    text: `Multiplying both sides by ${newA}`,
+                    isCorrect: false,
+                    misconceptionTag: "confuses_additive_and_multiplicative_inverse",
+                  },
+                  {
+                    text: `Dividing both sides by ${Math.abs(bLeft)}`,
+                    isCorrect: false,
+                    misconceptionTag: "targets_wrong_term_first",
+                  },
+                ]
+          );
+        })(),
+        explanationOnCorrect: `The coefficient ${newA} cancels when you divide both sides by ${newA}.`,
+      });
 
-    // Confirming the coefficient is 1 reveals a NEW, partial line: only
-    // the isolated variable, nothing else - the still-pending other side
-    // isn't repeated here a second time (it already appears once, on the
-    // permanent fraction-setup line above).
-    const coeffConfirmedRow = partialRow({ col: leftXCol, value: x });
-    const coeffOneDistractors1 = dedupNumeric("1", [
-      { text: `${newA}`, tag: "forgot_to_apply_operation" },
-      { text: "0", tag: "confuses_division_with_subtraction_pattern" },
-      { text: `${-newA}`, tag: "sign_error" },
-    ]);
-    steps.push({
-      stepId: "confirm_coefficient_one",
-      // NEW slot, distinct from divideSlotId: the fraction-setup line
-      // (e.g. "12x/12 = -84/12") stays on screen as its own permanent
-      // line, and this becomes a new line below it, rather than
-      // overwriting the fraction the moment the coefficient resolves.
-      rowUpdates: [{ slotId: "coefficient_confirmed", row: { cells: coeffConfirmedRow } }],
-      prompt: `What is ${newA} \u00f7 ${newA}?`,
-      choices: shuffle([
-        { text: "1", isCorrect: true, misconceptionTag: null },
-        { text: coeffOneDistractors1[0].text, isCorrect: false, misconceptionTag: coeffOneDistractors1[0].tag },
-        { text: coeffOneDistractors1[1].text, isCorrect: false, misconceptionTag: coeffOneDistractors1[1].tag },
-      ]),
-      explanationOnCorrect: `The coefficient ${newA} divided by itself is 1, so the variable is isolated.`,
-    });
+      // Confirming the coefficient is 1 reveals a NEW, partial line: only
+      // the isolated variable, nothing else - the still-pending other side
+      // isn't repeated here a second time (it already appears once, on the
+      // permanent fraction-setup line above).
+      const coeffConfirmedRow = partialRow({ col: leftXCol, value: x });
+      const coeffOneDistractors1 = dedupNumeric("1", [
+        { text: `${newA}`, tag: "forgot_to_apply_operation" },
+        { text: "0", tag: "confuses_division_with_subtraction_pattern" },
+        { text: `${-newA}`, tag: "sign_error" },
+      ]);
+      // Marked variant of the fraction-setup line - same MARKEDFRACTION
+      // technique used everywhere else for this divide-form case: the
+      // coefficient and its own copy in the denominator are the canceling
+      // pair, marked together once confirm_coefficient_one confirms it.
+      const divSetupMarked = `MARKEDFRACTION:${newA}\u0006${x}\u0005${newA}`;
+      const divideRowMarked = [...working];
+      if (leftXCol !== null) divideRowMarked[leftXCol] = divSetupMarked;
+      steps.push({
+        stepId: "confirm_coefficient_one",
+        // NEW slot, distinct from divideSlotId: the fraction-setup line
+        // (e.g. "12x/12 = -84/12") stays on screen as its own permanent
+        // line, and this becomes a new line below it, rather than
+        // overwriting the fraction the moment the coefficient resolves.
+        // Updates BOTH divideSlotId (adding the x-marks, now that the
+        // coefficient is actually confirmed to cancel) and
+        // "coefficient_confirmed" (the new line showing the isolated
+        // variable).
+        rowUpdates: [
+          { slotId: divideSlotId, row: { cells: divideRowMarked } },
+          { slotId: "coefficient_confirmed", row: { cells: coeffConfirmedRow } },
+        ],
+        prompt: `What is ${newA} \u00f7 ${newA}?`,
+        choices: shuffle([
+          { text: "1", isCorrect: true, misconceptionTag: null },
+          { text: coeffOneDistractors1[0].text, isCorrect: false, misconceptionTag: coeffOneDistractors1[0].tag },
+          { text: coeffOneDistractors1[1].text, isCorrect: false, misconceptionTag: coeffOneDistractors1[1].tag },
+        ]),
+        explanationOnCorrect: `The coefficient ${newA} divided by itself is 1, so the variable is isolated.`,
+      });
 
-    const sameSign = newRhs >= 0 === newA >= 0;
-    const finalDistractors = dedupNumeric(`${x} = ${solution}`, [
-      { text: `${x} = ${-solution}`, tag: "sign_error" },
-      { text: `${x} = ${newRhs}`, tag: "forgot_final_operation" },
-      { text: `${x} = ${solution + 1}`, tag: "arithmetic_slip" },
-      { text: `${x} = ${solution - 1}`, tag: "arithmetic_slip" },
-    ]);
-    steps.push({
-      stepId: "compute_value",
-      // Same slot as confirm_coefficient_one - this fills in the answer
-      // on the SAME line that already showed the isolated variable,
-      // rather than starting yet another new line.
-      rowUpdates: [
-        {
-          slotId: "coefficient_confirmed",
-          row: {
-            cells: partialRow({ col: leftXCol, value: x }, { col: rightConstCol, value: renderConstant(solution) }),
-            highlight: "success",
+      const sameSign = newRhs >= 0 === newA >= 0;
+      const finalDistractors = dedupNumeric(`${x} = ${solution}`, [
+        { text: `${x} = ${-solution}`, tag: "sign_error" },
+        { text: `${x} = ${newRhs}`, tag: "forgot_final_operation" },
+        { text: `${x} = ${solution + 1}`, tag: "arithmetic_slip" },
+        { text: `${x} = ${solution - 1}`, tag: "arithmetic_slip" },
+      ]);
+      steps.push({
+        stepId: "compute_value",
+        // Same slot as confirm_coefficient_one - this fills in the answer
+        // on the SAME line that already showed the isolated variable,
+        // rather than starting yet another new line.
+        rowUpdates: [
+          {
+            slotId: "coefficient_confirmed",
+            row: {
+              cells: partialRow({ col: leftXCol, value: x }, { col: rightConstCol, value: renderConstant(solution) }),
+              highlight: "success",
+            },
           },
-        },
-      ],
-      prompt: `${newRhs} \u00f7 ${newA} = ? What is the value of ${x}?`,
-      choices: shuffle([
-        { text: `${x} = ${solution}`, isCorrect: true, misconceptionTag: null },
-        { text: finalDistractors[0].text, isCorrect: false, misconceptionTag: finalDistractors[0].tag },
-        { text: finalDistractors[1].text, isCorrect: false, misconceptionTag: finalDistractors[1].tag },
-      ]),
-      explanationOnCorrect: sameSign
-        ? `The quotient ${newRhs} \u00f7 ${newA} = ${solution}. Same signs give a positive result.`
-        : `The quotient ${newRhs} \u00f7 ${newA} = ${solution}. Different signs give a negative result.`,
-    });
+        ],
+        prompt: `${newRhs} \u00f7 ${newA} = ? What is the value of ${x}?`,
+        choices: shuffle([
+          { text: `${x} = ${solution}`, isCorrect: true, misconceptionTag: null },
+          { text: finalDistractors[0].text, isCorrect: false, misconceptionTag: finalDistractors[0].tag },
+          { text: finalDistractors[1].text, isCorrect: false, misconceptionTag: finalDistractors[1].tag },
+        ]),
+        explanationOnCorrect: sameSign
+          ? `The quotient ${newRhs} \u00f7 ${newA} = ${solution}. Same signs give a positive result.`
+          : `The quotient ${newRhs} \u00f7 ${newA} = ${solution}. Different signs give a negative result.`,
+      });
+    }
   } else {
     // ---------- Case B: the variable only ever appears on one side ----------
     const varOnLeft = aLeft !== 0;
@@ -710,6 +868,10 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
 
     let newRhs = rhsValue;
     const divideSlotId = "isolated";
+    // Same no-op-divide reasoning as the bothHaveX case above - coef
+    // comes directly from the generator here (randInt(1,9)), so it can
+    // legitimately land on exactly 1.
+    const needsDivide = coef !== 1;
 
     if (bOnVarSide !== 0) {
       const absB = Math.abs(bOnVarSide);
@@ -719,6 +881,25 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
       const cancelDisplay1 = renderConstant(-bOnVarSide, true, !isLeadingCol(constColOnVarSide));
       const cancelDisplay2 = renderConstant(-bOnVarSide, true, !isLeadingCol(rhsCol));
       const cancelRow = minimalRow({ col: constColOnVarSide, value: cancelDisplay1 }, { col: rhsCol, value: cancelDisplay2 });
+      // Marked variant for the annotation's own opposite constant - only
+      // constColOnVarSide (the position directly pairing with the
+      // current line's own bOnVarSide constant), same asymmetric
+      // convention as the bothHaveX case above.
+      const cancelRowMarked = minimalRow(
+        { col: constColOnVarSide, value: `MARKEDTERM:${cancelDisplay1}` },
+        { col: rhsCol, value: cancelDisplay2 }
+      );
+      // Marked variant of the current line - bOnVarSide's own term gets
+      // an x-mark once cancel_constant confirms the two opposites
+      // combine to 0, not before. Which slot holds the current line
+      // depends on whether combine_left/combine_right fired earlier: if
+      // either side needed combining, "combined_row" is the current
+      // line; otherwise it's still "__initial__" (nothing else has
+      // touched it yet in this branch, since Case B has no
+      // combine_variable_term phase to have established anything newer).
+      const currentSlotForCancelConstant = leftCombine || rightCombine ? "combined_row" : "__initial__";
+      const currentLineMarked = [...working];
+      if (constColOnVarSide !== null) currentLineMarked[constColOnVarSide] = `MARKEDTERM:${working[constColOnVarSide]}`;
 
       steps.push({
         stepId: "goal_eliminate_constant",
@@ -750,7 +931,12 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
       ]);
       steps.push({
         stepId: "cancel_constant",
-        rowUpdates: [],
+        // Both opposite constants get the x-mark together, once they're
+        // confirmed to combine to 0.
+        rowUpdates: [
+          { slotId: currentSlotForCancelConstant, row: { cells: currentLineMarked } },
+          { slotId: "cancel_const_annotation", row: { cells: cancelRowMarked } },
+        ],
         prompt: `What is ${bOnVarSide} ${opSym} ${absB}?`,
         choices: shuffle([
           { text: "0", isCorrect: true, misconceptionTag: null },
@@ -773,90 +959,110 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
       ]);
       steps.push({
         stepId: "combine_constant",
-        rowUpdates: [{ slotId: "isolated", row: { cells: working } }],
+        rowUpdates: [
+          {
+            slotId: "isolated",
+            row: { cells: working, ...(needsDivide ? {} : { highlight: "success" as const }) },
+          },
+        ],
         prompt: `What is ${rhsValue} ${opSym} ${absB}?`,
         choices: shuffle([
           { text: `${newRhs}`, isCorrect: true, misconceptionTag: null },
           { text: combineDistractors[0].text, isCorrect: false, misconceptionTag: combineDistractors[0].tag },
           { text: combineDistractors[1].text, isCorrect: false, misconceptionTag: combineDistractors[1].tag },
         ]),
-        explanationOnCorrect: `The terms combine to ${newRhs}. The rest of the equation gets brought down unchanged.`,
+        explanationOnCorrect: needsDivide
+          ? `The terms combine to ${newRhs}. The rest of the equation gets brought down unchanged.`
+          : `The terms combine to ${newRhs}. Since the coefficient of ${x} is already 1, this is the final answer: ${x} = ${newRhs}.`,
       });
     }
 
-    const divSetup = `\\dfrac{${renderMultiplyTerm(coef, x)}}{${coef}}`;
-    const divRhs = `\\dfrac{${newRhs}}{${coef}}`;
-    working = [...working];
-    setCol(working, varCol, divSetup);
-    setCol(working, rhsCol, divRhs);
-    steps.push({
-      stepId: "eliminate_coefficient",
-      rowUpdates: [{ slotId: divideSlotId, row: { cells: working } }],
-      prompt: `What undoes multiplying ${x} by ${coef}?`,
-      choices: shuffle([
-        { text: `Dividing both sides by ${coef}`, isCorrect: true, misconceptionTag: null },
-        {
-          text: `Multiplying both sides by ${coef}`,
-          isCorrect: false,
-          misconceptionTag: "confuses_additive_and_multiplicative_inverse",
-        },
-        {
-          text: `Adding ${Math.abs(coef)} to both sides`,
-          isCorrect: false,
-          misconceptionTag: "confuses_additive_and_multiplicative_inverse",
-        },
-      ]),
-      explanationOnCorrect: `The coefficient ${coef} cancels when you divide both sides by ${coef}.`,
-    });
-
-    // Confirming the coefficient is 1 reveals a NEW, partial line: only
-    // the isolated variable, nothing else.
-    const coeffConfirmedRow = partialRow({ col: varCol, value: x });
-    const coeffOneDistractors2 = dedupNumeric("1", [
-      { text: `${coef}`, tag: "forgot_to_apply_operation" },
-      { text: "0", tag: "confuses_division_with_subtraction_pattern" },
-      { text: `${-coef}`, tag: "sign_error" },
-    ]);
-    steps.push({
-      stepId: "confirm_coefficient_one",
-      rowUpdates: [{ slotId: "coefficient_confirmed", row: { cells: coeffConfirmedRow } }],
-      prompt: `What is ${coef} \u00f7 ${coef}?`,
-      choices: shuffle([
-        { text: "1", isCorrect: true, misconceptionTag: null },
-        { text: coeffOneDistractors2[0].text, isCorrect: false, misconceptionTag: coeffOneDistractors2[0].tag },
-        { text: coeffOneDistractors2[1].text, isCorrect: false, misconceptionTag: coeffOneDistractors2[1].tag },
-      ]),
-      explanationOnCorrect: `The coefficient ${coef} divided by itself is 1, so the variable is isolated.`,
-    });
-
-    const sameSign = newRhs >= 0 === coef >= 0;
-    const finalDistractors = dedupNumeric(`${x} = ${solution}`, [
-      { text: `${x} = ${-solution}`, tag: "sign_error" },
-      { text: `${x} = ${newRhs}`, tag: "forgot_final_operation" },
-      { text: `${x} = ${solution + 1}`, tag: "arithmetic_slip" },
-      { text: `${x} = ${solution - 1}`, tag: "arithmetic_slip" },
-    ]);
-    steps.push({
-      stepId: "compute_value",
-      rowUpdates: [
-        {
-          slotId: "coefficient_confirmed",
-          row: {
-            cells: partialRow({ col: varCol, value: x }, { col: rhsCol, value: renderConstant(solution) }),
-            highlight: "success",
+    if (needsDivide) {
+        const divSetup = `\\dfrac{${renderMultiplyTerm(coef, x)}}{${coef}}`;
+        const divRhs = `\\dfrac{${newRhs}}{${coef}}`;
+        working = [...working];
+        setCol(working, varCol, divSetup);
+        setCol(working, rhsCol, divRhs);
+        steps.push({
+          stepId: "eliminate_coefficient",
+        rowUpdates: [{ slotId: divideSlotId, row: { cells: working } }],
+        prompt: `What undoes multiplying ${x} by ${coef}?`,
+        choices: shuffle([
+          { text: `Dividing both sides by ${coef}`, isCorrect: true, misconceptionTag: null },
+          {
+            text: `Multiplying both sides by ${coef}`,
+            isCorrect: false,
+            misconceptionTag: "confuses_additive_and_multiplicative_inverse",
           },
-        },
-      ],
-      prompt: `${newRhs} \u00f7 ${coef} = ? What is the value of ${x}?`,
-      choices: shuffle([
-        { text: `${x} = ${solution}`, isCorrect: true, misconceptionTag: null },
-        { text: finalDistractors[0].text, isCorrect: false, misconceptionTag: finalDistractors[0].tag },
-        { text: finalDistractors[1].text, isCorrect: false, misconceptionTag: finalDistractors[1].tag },
-      ]),
-      explanationOnCorrect: sameSign
-        ? `The quotient ${newRhs} \u00f7 ${coef} = ${solution}. Same signs give a positive result.`
-        : `The quotient ${newRhs} \u00f7 ${coef} = ${solution}. Different signs give a negative result.`,
-    });
+          {
+            text: `Adding ${Math.abs(coef)} to both sides`,
+            isCorrect: false,
+            misconceptionTag: "confuses_additive_and_multiplicative_inverse",
+          },
+        ]),
+        explanationOnCorrect: `The coefficient ${coef} cancels when you divide both sides by ${coef}.`,
+      });
+
+      // Confirming the coefficient is 1 reveals a NEW, partial line: only
+      // the isolated variable, nothing else.
+      const coeffConfirmedRow = partialRow({ col: varCol, value: x });
+      const coeffOneDistractors2 = dedupNumeric("1", [
+        { text: `${coef}`, tag: "forgot_to_apply_operation" },
+        { text: "0", tag: "confuses_division_with_subtraction_pattern" },
+        { text: `${-coef}`, tag: "sign_error" },
+      ]);
+      // Marked variant of the fraction-setup line - same technique as the
+      // bothHaveX branch above.
+      const divSetupMarked2 = `MARKEDFRACTION:${coef}\u0006${x}\u0005${coef}`;
+      const divideRowMarked2 = [...working];
+      if (varCol !== null) divideRowMarked2[varCol] = divSetupMarked2;
+      steps.push({
+        stepId: "confirm_coefficient_one",
+        // Updates BOTH divideSlotId (adding the x-marks) and
+        // "coefficient_confirmed" (the new line showing the isolated
+        // variable).
+        rowUpdates: [
+          { slotId: divideSlotId, row: { cells: divideRowMarked2 } },
+          { slotId: "coefficient_confirmed", row: { cells: coeffConfirmedRow } },
+        ],
+        prompt: `What is ${coef} \u00f7 ${coef}?`,
+        choices: shuffle([
+          { text: "1", isCorrect: true, misconceptionTag: null },
+          { text: coeffOneDistractors2[0].text, isCorrect: false, misconceptionTag: coeffOneDistractors2[0].tag },
+          { text: coeffOneDistractors2[1].text, isCorrect: false, misconceptionTag: coeffOneDistractors2[1].tag },
+        ]),
+        explanationOnCorrect: `The coefficient ${coef} divided by itself is 1, so the variable is isolated.`,
+      });
+
+      const sameSign = newRhs >= 0 === coef >= 0;
+      const finalDistractors = dedupNumeric(`${x} = ${solution}`, [
+        { text: `${x} = ${-solution}`, tag: "sign_error" },
+        { text: `${x} = ${newRhs}`, tag: "forgot_final_operation" },
+        { text: `${x} = ${solution + 1}`, tag: "arithmetic_slip" },
+        { text: `${x} = ${solution - 1}`, tag: "arithmetic_slip" },
+      ]);
+      steps.push({
+        stepId: "compute_value",
+        rowUpdates: [
+          {
+            slotId: "coefficient_confirmed",
+            row: {
+              cells: partialRow({ col: varCol, value: x }, { col: rhsCol, value: renderConstant(solution) }),
+              highlight: "success",
+            },
+          },
+        ],
+        prompt: `${newRhs} \u00f7 ${coef} = ? What is the value of ${x}?`,
+        choices: shuffle([
+          { text: `${x} = ${solution}`, isCorrect: true, misconceptionTag: null },
+          { text: finalDistractors[0].text, isCorrect: false, misconceptionTag: finalDistractors[0].tag },
+          { text: finalDistractors[1].text, isCorrect: false, misconceptionTag: finalDistractors[1].tag },
+        ]),
+        explanationOnCorrect: sameSign
+          ? `The quotient ${newRhs} \u00f7 ${coef} = ${solution}. Same signs give a positive result.`
+          : `The quotient ${newRhs} \u00f7 ${coef} = ${solution}. Different signs give a negative result.`,
+      });
+    }
   }
 
   return {
