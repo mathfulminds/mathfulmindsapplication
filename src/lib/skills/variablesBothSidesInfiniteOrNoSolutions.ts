@@ -57,6 +57,20 @@ export function buildSolverInstance(
     ),
   };
 
+  // Marked variant - BOTH sides' variable term gets an x-mark once
+  // cancel_variable_term confirms they combine to 0, not before. Unlike
+  // the general "variables on both sides" case, both instances cancel
+  // simultaneously here (they share the same coefficient), so both get
+  // marked together, not just one side's own copy.
+  const initialRowMarked: GridRow = {
+    cells: assembleBothSides(
+      `MARKEDTERM:${renderMultiplyTerm(a, x)}`,
+      renderConstant(bLeft, true),
+      `MARKEDTERM:${renderMultiplyTerm(a, x)}`,
+      renderConstant(bRight, true)
+    ),
+  };
+
   // ---------- Step 1: undo the variable term on the right ----------
 
   const absA = Math.abs(a);
@@ -66,6 +80,10 @@ export function buildSolverInstance(
   const cancelVarDisplay = renderMultiplyTerm(-a, x, true, false);
   const cancelVarRow: GridRow = {
     cells: assembleBothSides(cancelVarDisplay, BLANK, cancelVarDisplay, BLANK, ""),
+  };
+  // Marked variant for both sides' own opposite annotation.
+  const cancelVarRowMarked: GridRow = {
+    cells: assembleBothSides(`MARKEDTERM:${cancelVarDisplay}`, BLANK, `MARKEDTERM:${cancelVarDisplay}`, BLANK, ""),
   };
 
   const correctOpText = aPositive
@@ -112,7 +130,14 @@ export function buildSolverInstance(
 
   const cancel1: SolverStep = {
     stepId: "cancel_variable_term",
-    rowUpdates: [{ slotId: "reduced_equation", row: reducedRow }],
+    // Both marks go alongside the existing "reduced_equation" reveal,
+    // matching combiningLikeTerms.ts's same structure: this step
+    // confirms 0 AND reveals the next line in one go.
+    rowUpdates: [
+      { slotId: "__initial__", row: initialRowMarked },
+      { slotId: "cancel_var_annotation", row: cancelVarRowMarked },
+      { slotId: "reduced_equation", row: reducedRow },
+    ],
     prompt: `What is ${absA}${x} ${opSym} ${absA}${x}?`,
     choices: shuffle([
       { text: "0", isCorrect: true, misconceptionTag: null },
