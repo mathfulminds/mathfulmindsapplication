@@ -259,38 +259,96 @@ function renderParenMult(content: string, color: string): ReactNode {
 
 // Marked variant of PARENMULT: for nonIntegerSolutions.ts's fraction-mode
 // reciprocal technique, e.g. "(reciprocal)(coefficient x)" where the
-// reciprocal and the coefficient are the canceling pair (their product is
-// 1) and get the x-mark together, while the variable itself stays
-// unmarked - same "mark what cancels, leave the variable alone" rule as
-// every other coefficient-phase mark. There's no fraction bar here (two
-// plain parenthetical groups, not a numerator/denominator), so this
-// can't reuse renderMarkedParenFraction directly.
-// Format: "MARKEDPARENMULT:{reciprocal}\u0007{coefficient}\u0006{variableSymbol}".
+// reciprocal's DENOMINATOR and the coefficient are the actual canceling
+// pair (both equal |coefficient| - their product is 1) - the numerator
+// "1" isn't part of what's canceling and must stay unmarked. Since the
+// reciprocal of a/1 is always 1/|a| with the same sign as a, its display
+// is built manually here from `coefficient` alone (parsed for sign and
+// magnitude) rather than needing its own separate pre-rendered field -
+// same manual-layout technique renderMarkedFraction already uses to mark
+// only one part of a stacked fraction, just marking the denominator here
+// instead of the numerator.
+// Format: "MARKEDPARENMULT:{coefficient}\u0006{variableSymbol}".
 const MARKEDPARENMULT_PREFIX = "MARKEDPARENMULT:";
 
+function reciprocalDisplay(coefficient: string, color: string): ReactNode {
+  const n = parseInt(coefficient, 10);
+  // Sign lives INSIDE the mark now, alongside the denominator - the
+  // coefficient's own mark already wraps its sign together with its
+  // magnitude (e.g. "-9" as one marked unit), so the reciprocal's own
+  // denominator needs the same treatment for the two marks to read as a
+  // consistent pair, rather than the coefficient's sign being marked
+  // while the reciprocal's own sign is left untouched.
+  const denomWithSign = `${n < 0 ? "-" : ""}${Math.abs(n)}`;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "baseline" }}>
+      <span
+        style={{
+          display: "inline-flex",
+          flexDirection: "column",
+          alignItems: "center",
+          verticalAlign: "middle",
+          margin: "0 2px",
+        }}
+      >
+        <span style={{ paddingBottom: "0.15em" }}>
+          <InlineMath math="1" />
+        </span>
+        <span style={{ borderTop: `0.06em solid ${color}`, alignSelf: "stretch" }} />
+        <span style={{ paddingTop: "0.15em" }}>
+          <XMark size="large">
+            <InlineMath math={denomWithSign} />
+          </XMark>
+        </span>
+      </span>
+    </span>
+  );
+}
+
 function renderMarkedParenMult(content: string, color: string): ReactNode {
-  const sepIdx = content.indexOf(PARENMULT_SEPARATOR);
-  if (sepIdx === -1) return renderTextWithEmbeddedNumbers(content);
-  const reciprocal = content.slice(0, sepIdx);
-  const rest = content.slice(sepIdx + 1);
-  const coefVarSep = rest.indexOf(COEF_VAR_SEPARATOR);
-  if (coefVarSep === -1) return renderTextWithEmbeddedNumbers(rest);
-  const coefficient = rest.slice(0, coefVarSep);
-  const variableSymbol = rest.slice(coefVarSep + 1);
+  const coefVarSep = content.indexOf(COEF_VAR_SEPARATOR);
+  if (coefVarSep === -1) return renderTextWithEmbeddedNumbers(content);
+  const coefficient = content.slice(0, coefVarSep);
+  const variableSymbol = content.slice(coefVarSep + 1);
+  return (
+    <span style={{ color, display: "inline-flex", alignItems: "center" }}>
+      ({reciprocalDisplay(coefficient, color)})(
+      <XMark size="large">
+        <InlineMath math={coefficient} />
+      </XMark>
+      <span style={{ marginLeft: 4, fontSize: "1em" }}>
+        <InlineMath math={variableSymbol} />
+      </span>
+      )
+    </span>
+  );
+}
+
+// Reversed variant - for when the variable term's own column sits on the
+// LEFT side of the whole inequality/equation and the constant on the
+// right (so the reciprocal needs to sit on the OUTER edge of the whole
+// expression, past the variable term, rather than adjacent to it) -
+// renders "(coef VAR)(reciprocal)" instead of "(reciprocal)(coef VAR)".
+// Same field, same order (coefficient, variableSymbol) - only the VISUAL
+// order of the two parenthetical groups is swapped.
+// Format: "MARKEDPARENMULTR:{coefficient}\u0006{variableSymbol}".
+const MARKEDPARENMULT_REVERSED_PREFIX = "MARKEDPARENMULTR:";
+
+function renderMarkedParenMultReversed(content: string, color: string): ReactNode {
+  const coefVarSep = content.indexOf(COEF_VAR_SEPARATOR);
+  if (coefVarSep === -1) return renderTextWithEmbeddedNumbers(content);
+  const coefficient = content.slice(0, coefVarSep);
+  const variableSymbol = content.slice(coefVarSep + 1);
   return (
     <span style={{ color, display: "inline-flex", alignItems: "center" }}>
       (
       <XMark size="large">
-        <InlineMath math={reciprocal} />
-      </XMark>
-      )(
-      <XMark size="large">
         <InlineMath math={coefficient} />
       </XMark>
-      <span style={{ marginLeft: 4 }}>
+      <span style={{ marginLeft: 4, fontSize: "1em" }}>
         <InlineMath math={variableSymbol} />
       </span>
-      )
+      )({reciprocalDisplay(coefficient, color)})
     </span>
   );
 }
@@ -299,14 +357,20 @@ function renderMarkedParenMult(content: string, color: string): ReactNode {
 // term or a fraction's numerator/denominator has been canceled out,
 // matching the handwritten convention of striking through a canceled
 // value rather than just showing an annotation below it.
-function XMark({ children, size = "normal" }: { children: ReactNode; size?: "normal" | "large" }) {
-  // "large" extends the lines further beyond the content's own edges and
-  // thickens them slightly - used for the coefficient-cancellation marks
-  // specifically, which wrap smaller content (just "-11" alone) than the
-  // constant-cancellation marks (a whole term like "+17"), so they read
-  // as proportionally small without a bit more reach.
-  const inset = size === "large" ? -3 : 2;
-  const thickness = size === "large" ? 2.5 : 2;
+function XMark({ children }: { children: ReactNode; size?: "normal" | "large" }) {
+  // The old "normal"/"large" split assumed constant-cancellation marks
+  // always wrap WIDER content (a whole term like "+17") than
+  // coefficient-cancellation marks (just "-11" alone) - but that breaks
+  // whenever the constant itself happens to be a single digit (e.g. "9"),
+  // which is just as narrow as any coefficient, and read as
+  // disproportionately thin. A proportional, measured reach was tried
+  // first, but its timing (useLayoutEffect running before some instances
+  // had settled at their final rendered width) produced visibly
+  // inconsistent results between two marks on the very same screen. A
+  // single, fixed, more generous reach is simpler and renders
+  // predictably regardless of the content's own width.
+  const inset = -4;
+  const thickness = 2.5;
   return (
     <span style={{ position: "relative", display: "inline-block" }}>
       {children}
@@ -515,6 +579,7 @@ function Cell({ math, color, align = "center" }: { math: string; color: string; 
   const isMarkedParenFraction = content.startsWith(MARKEDPARENFRACTION_PREFIX);
   const isParenMult = content.startsWith(PARENMULT_PREFIX);
   const isMarkedParenMult = content.startsWith(MARKEDPARENMULT_PREFIX);
+  const isMarkedParenMultReversed = content.startsWith(MARKEDPARENMULT_REVERSED_PREFIX);
   const math_ = content;
   return (
     <div
@@ -532,6 +597,8 @@ function Cell({ math, color, align = "center" }: { math: string; color: string; 
         renderMarkedFraction(math_.slice(MARKEDFRACTION_PREFIX.length), color)
       ) : isMarkedParenFraction ? (
         renderMarkedParenFraction(math_.slice(MARKEDPARENFRACTION_PREFIX.length), color)
+      ) : isMarkedParenMultReversed ? (
+        renderMarkedParenMultReversed(math_.slice(MARKEDPARENMULT_REVERSED_PREFIX.length), color)
       ) : isMarkedParenMult ? (
         renderMarkedParenMult(math_.slice(MARKEDPARENMULT_PREFIX.length), color)
       ) : isParenMult ? (
@@ -974,6 +1041,7 @@ function EquationGrid({
           math.startsWith(MARKEDFRACTION_PREFIX) ||
           math.startsWith(MARKEDPARENFRACTION_PREFIX) ||
           math.startsWith(MARKEDPARENMULT_PREFIX) ||
+          math.startsWith(MARKEDPARENMULT_REVERSED_PREFIX) ||
           math.startsWith(PARENMULT_PREFIX) ||
           math.startsWith(LEFTALIGN_PREFIX)
         )
@@ -1533,7 +1601,33 @@ export default function StepSolver({
         }
       `}</style>
       {celebration !== null && <Celebration celebrationKey={celebration} onDone={() => setCelebration(null)} />}
+      {/* Below a certain width, the side-by-side math/MCQ layout leaves
+          too little room for the math panel - a 4-column inequality row
+          (constant, symbol, two expression terms) commonly needs ~190px,
+          but halving the card's width down to a phone-sized viewport can
+          leave well under half that, forcing the row into its own
+          horizontal scroll container with no visible affordance that
+          there's more content past the right edge - the rightmost term
+          (often the answer itself) ends up sitting right at that
+          silently-clipped edge. Stacking the two panels vertically below
+          this breakpoint gives the math panel the full card width
+          instead of half, which comfortably fits typical rows without
+          needing to scroll at all. `!important` is required since the
+          columns below are set via inline style, which media queries
+          can't otherwise override. */}
+      <style>{`
+        @media (max-width: 640px) {
+          .step-solver-panel {
+            grid-template-columns: 1fr !important;
+          }
+          .step-solver-panel-left {
+            border-right: none !important;
+            border-bottom: 1px solid var(--line);
+          }
+        }
+      `}</style>
       <div
+        className="step-solver-panel"
         style={{
           display: "grid",
           gridTemplateColumns: instance.panelRatio ?? "1fr 1fr",
@@ -1545,6 +1639,7 @@ export default function StepSolver({
       >
       {/* LEFT: math */}
       <div
+        className="step-solver-panel-left"
         style={{
           padding: "32px 28px",
           borderRight: "1px solid var(--line)",

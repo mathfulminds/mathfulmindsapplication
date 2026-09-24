@@ -183,13 +183,31 @@ export function buildNonIntegerSolverInstance(
   // which OPERATION the coefficient step teaches, not just how the same
   // operation is displayed.
   const reciprocal = renderReciprocal(a, 1);
+  // Which side of the whole row each half sits on - determines which
+  // edge of its own cell text the reciprocal belongs at, so it lands on
+  // the OUTER edge of the whole expression rather than always sitting
+  // immediately next to the value it's multiplying. Same reasoning
+  // already established in fractionalCoefficientsInequalities.ts.
+  const exprIsLeftOfEquals = orientation === "expressionLeft";
+  const constantIsLeftOfEquals = orientation === "expressionRight";
   let stepBRow: GridRow;
   let stepBRowMarked: GridRow;
   if (mode === "fraction") {
     // Real KaTeX either way for the variable side - a plain-integer
     // coefficient term never needs the overline treatment.
-    const multipliedVarTerm = `(${reciprocal})${variableTermNatural}`;
-    const multipliedConstant = `PARENMULT:${reciprocal}\u0007${fractionToKatex(simplifiedRhs)}`;
+    // Wrapped in PARENMULT: (not a plain string concatenation) so the
+    // variable term gets its own parens too, matching the constant
+    // side's own treatment via renderParenMult - a bare "(recip)-4x"
+    // string reads visually as subtraction, not multiplication, once
+    // the variable term's own coefficient is negative. The argument
+    // order itself flips with exprIsLeftOfEquals/constantIsLeftOfEquals,
+    // putting the reciprocal on the OUTER edge of the whole row.
+    const multipliedVarTerm = exprIsLeftOfEquals
+      ? `PARENMULT:${reciprocal}\u0007${variableTermNatural}`
+      : `PARENMULT:${variableTermNatural}\u0007${reciprocal}`;
+    const multipliedConstant = constantIsLeftOfEquals
+      ? `PARENMULT:${reciprocal}\u0007${fractionToKatex(simplifiedRhs)}`
+      : `PARENMULT:${fractionToKatex(simplifiedRhs)}\u0007${reciprocal}`;
     const setupExpr1 = bIsSecond ? multipliedVarTerm : BLANK;
     const setupExpr2 = bIsSecond ? BLANK : multipliedVarTerm;
     stepBRow = { cells: assembleRow(setupExpr1, setupExpr2, multipliedConstant, orientation) };
@@ -198,8 +216,11 @@ export function buildNonIntegerSolverInstance(
     // together, once confirm_coefficient_one confirms that - not before.
     // Only the variable side needs a mark; the constant side is just a
     // computed result, same as the divide-form case elsewhere never
-    // marks its own rhs either.
-    const multipliedVarTermMarked = `MARKEDPARENMULT:${reciprocal}\u0007${a}\u0006${variableSymbol}`;
+    // marks its own rhs either. MARKEDPARENMULTR: (reversed) matches
+    // multipliedVarTerm's own argument-order flip above.
+    const multipliedVarTermMarked = exprIsLeftOfEquals
+      ? `MARKEDPARENMULT:${a}\u0006${variableSymbol}`
+      : `MARKEDPARENMULTR:${a}\u0006${variableSymbol}`;
     const setupExpr1Marked = bIsSecond ? multipliedVarTermMarked : BLANK;
     const setupExpr2Marked = bIsSecond ? BLANK : multipliedVarTermMarked;
     stepBRowMarked = { cells: assembleRow(setupExpr1Marked, setupExpr2Marked, multipliedConstant, orientation) };
