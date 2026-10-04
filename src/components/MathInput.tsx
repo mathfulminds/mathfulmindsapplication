@@ -48,6 +48,22 @@ interface ToolButton {
   label: string;
   insert: string;
   aria: string;
+  icon?: "notEqual"; // drawn as an SVG instead of a KaTeX label
+}
+
+// "≠" with a long slash that clearly crosses both bars (the standard math
+// font's slash is short and thin, and reads like a stray mark at button
+// size). Same stroke weight and rounded ends as the bars.
+function NotEqualIcon() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true" style={{ display: "block" }}>
+      <g stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" fill="none">
+        <line x1="5" y1="9.5" x2="19" y2="9.5" />
+        <line x1="5" y1="14.5" x2="19" y2="14.5" />
+        <line x1="6.5" y1="20.5" x2="17.5" y2="3.5" />
+      </g>
+    </svg>
+  );
 }
 const GROUPS: { name: string; buttons: ToolButton[] }[] = [
   {
@@ -64,7 +80,7 @@ const GROUPS: { name: string; buttons: ToolButton[] }[] = [
     name: "Compare",
     buttons: [
       { label: "=", insert: "=", aria: "equals" },
-      { label: "\\neq", insert: "\\ne", aria: "not equal to" },
+      { label: "\\neq", insert: "\\ne", aria: "not equal to", icon: "notEqual" },
       { label: "<", insert: "<", aria: "less than" },
       { label: ">", insert: ">", aria: "greater than" },
       { label: "\\leq", insert: "\\le", aria: "less than or equal to" },
@@ -200,6 +216,32 @@ const MathInput = forwardRef<MathInputHandle, Props>(function MathInput({ onChan
         field.smartSuperscript = true;
         field.inlineShortcuts = INLINE_SHORTCUTS;
         field.menuItems = [];
+        // Draw "≠" inside the field the same way as the button: an "=" with
+        // a long slash through it. The field's value is still "\\ne", so
+        // nothing downstream changes - this only affects how it looks.
+        const notEqual = { def: "\\mathrel{\\class{mm-ne}{=}}", args: 0, expand: false };
+        field.macros = { ...(field.macros as Record<string, unknown>), ne: notEqual, neq: notEqual };
+        const root = field.shadowRoot;
+        if (root && !root.querySelector("style[data-mm-ne]")) {
+          const style = document.createElement("style");
+          style.setAttribute("data-mm-ne", "");
+          style.textContent = `
+            .mm-ne { position: relative; display: inline-block; }
+            .mm-ne::after {
+              content: "";
+              position: absolute;
+              left: 50%;
+              top: 50%;
+              width: 0.048em;
+              height: 1.05em;
+              border-radius: 0.03em;
+              background: currentColor;
+              transform: translate(-50%, -45%) rotate(42deg);
+              pointer-events: none;
+            }
+          `;
+          root.appendChild(style);
+        }
         field.setAttribute("aria-label", ariaLabel ?? "Math input");
         field.className = "math-input-field";
       };
@@ -330,7 +372,7 @@ const MathInput = forwardRef<MathInputHandle, Props>(function MathInput({ onChan
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => press(b)}
               >
-                <InlineMath math={b.label} />
+                {b.icon === "notEqual" ? <NotEqualIcon /> : <InlineMath math={b.label} />}
               </button>
             ))}
           </div>
