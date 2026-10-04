@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { InlineMath } from "react-katex";
 import "katex/dist/katex.min.css";
 import StepSolver from "@/components/solver/StepSolver";
-import { parseInput } from "@/lib/input/parseEquation";
+import MathInput from "@/components/MathInput";
+import type { MathInputHandle } from "@/components/MathInput";
 import { routeInput } from "@/lib/input/routeEquation";
 import type { RouteResult } from "@/lib/input/routeEquation";
 
@@ -13,23 +14,14 @@ import type { RouteResult } from "@/lib/input/routeEquation";
 // equation, inequality, or system, and it's routed to the matching skill's
 // step-by-step solver - see src/lib/input/ for how parsing and routing work.
 
+// LaTeX, since the math field displays (and returns) LaTeX.
 const EXAMPLES = [
-  "3x + 5 = 11",
-  "x/4 = 5",
-  "-2(3x - 1) ≥ 8",
-  "(2/3)x + 4 = 10",
-  "5x - 3 = 2x + 9",
-  "x + 2y = 7, 3x - 2y = 5",
-];
-
-// Symbols that are awkward to type on a phone keyboard.
-const SYMBOLS: { label: string; insert: string; aria: string }[] = [
-  { label: "≤", insert: " ≤ ", aria: "less than or equal to" },
-  { label: "≥", insert: " ≥ ", aria: "greater than or equal to" },
-  { label: "<", insert: " < ", aria: "less than" },
-  { label: ">", insert: " > ", aria: "greater than" },
-  { label: "( )", insert: "()", aria: "parentheses" },
-  { label: "a/b", insert: "/", aria: "fraction bar" },
+  "3x+5=11",
+  "\\frac{x}{4}=5",
+  "-2\\left(3x-1\\right)\\ge8",
+  "\\frac{2}{3}x+4=10",
+  "5x-3=2x+9",
+  "x+2y=7,\\;3x-2y=5",
 ];
 
 interface Solved {
@@ -38,25 +30,18 @@ interface Solved {
 }
 
 export default function YourProblemPage() {
-  const [text, setText] = useState("");
+  const [latex, setLatex] = useState("");
   const [solved, setSolved] = useState<Solved | null>(null);
   const [optionIndex, setOptionIndex] = useState(0);
-  const [error, setError] = useState<{ message: string; latex?: string } | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const mathRef = useRef<MathInputHandle>(null);
+  const latexRef = useRef("");
   const solveCount = useRef(0);
 
-  // Live preview of how the input is being read - shown only once it
-  // parses, so half-typed problems don't flash error messages.
-  const preview = useMemo(() => {
-    if (!text.trim()) return null;
-    const p = parseInput(text);
-    if (!p.ok) return null;
-    return p.equations.length === 1
-      ? p.equations[0].latex
-      : `\\begin{cases} ${p.equations.map((e) => e.latex).join(" \\\\ ")} \\end{cases}`;
-  }, [text]);
+  const isEmpty = (l: string) => l.replace(/\\placeholder\{[^}]*\}|\s|\\[,;: ]/g, "") === "";
 
   function solve(input: string) {
+    if (isEmpty(input)) return;
     const result = routeInput(input);
     if (result.ok) {
       solveCount.current += 1;
@@ -65,23 +50,8 @@ export default function YourProblemPage() {
       setError(null);
     } else {
       setSolved(null);
-      setError({ message: result.error, latex: result.latex });
+      setError(result.error);
     }
-  }
-
-  function insertSymbol(sym: string) {
-    const el = inputRef.current;
-    const start = el?.selectionStart ?? text.length;
-    const end = el?.selectionEnd ?? text.length;
-    const next = text.slice(0, start) + sym + text.slice(end);
-    setText(next);
-    setError(null);
-    // Put the cursor inside "()" or right after anything else.
-    const caret = start + (sym === "()" ? 1 : sym.length);
-    requestAnimationFrame(() => {
-      el?.focus();
-      el?.setSelectionRange(caret, caret);
-    });
   }
 
   const option = solved ? solved.result.options[Math.min(optionIndex, solved.result.options.length - 1)] : null;
@@ -92,13 +62,8 @@ export default function YourProblemPage() {
   return (
     <div style={{ maxWidth: wide ? 1300 : 900, margin: "0 auto", padding: "48px 24px 80px" }}>
       <style>{`
-        .yp-chip:hover { border-color: var(--blue) !important; color: var(--blue) !important; }
-        .yp-sym:hover { background: var(--paper) !important; }
-        .yp-input:focus { outline: none; border-color: var(--blue) !important; box-shadow: 0 0 0 3px rgba(46,111,163,0.15); }
-        .yp-solve:hover { background: var(--blue-dark) !important; }
-        @media (max-width: 640px) {
-          .yp-row { flex-direction: column; align-items: stretch !important; }
-        }
+        .yp-chip:hover { border-color: var(--blue) !important; }
+        .yp-solve:hover:not(:disabled) { background: var(--blue-dark) !important; }
       `}</style>
 
       {/* 852 = the normal 900px page width minus its 24px side padding, so
@@ -114,11 +79,7 @@ export default function YourProblemPage() {
         </p>
 
         {/* INPUT CARD */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            solve(text);
-          }}
+        <div
           style={{
             background: "var(--card)",
             border: "1px solid var(--line)",
@@ -128,101 +89,45 @@ export default function YourProblemPage() {
             marginBottom: 28,
           }}
         >
-          <label
-            htmlFor="problem-input"
+          <div
             style={{
-              display: "block",
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: "0.05em",
-              textTransform: "uppercase",
-              color: "var(--ink-soft)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
               marginBottom: 8,
             }}
           >
-            Your problem
-          </label>
-          <div className="yp-row" style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <input
-              id="problem-input"
-              ref={inputRef}
-              className="yp-input"
-              value={text}
-              onChange={(e) => {
-                setText(e.target.value);
-                setError(null);
-              }}
-              placeholder="e.g. 3x + 5 = 11"
-              autoComplete="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              inputMode="text"
-              aria-describedby="problem-help"
+            <span
               style={{
-                flex: 1,
-                minWidth: 0,
-                fontFamily: "var(--font-mono)",
-                fontSize: 18,
-                padding: "12px 14px",
-                border: "1.5px solid var(--line)",
-                borderRadius: 10,
-                background: "var(--paper)",
-                color: "var(--ink)",
-              }}
-            />
-            <button
-              type="submit"
-              className="yp-solve"
-              disabled={!text.trim()}
-              style={{
-                background: "var(--blue)",
-                color: "#fff",
-                border: "none",
-                borderRadius: 999,
-                padding: "12px 24px",
-                fontSize: 15,
+                fontSize: 12,
                 fontWeight: 700,
-                cursor: text.trim() ? "pointer" : "default",
-                opacity: text.trim() ? 1 : 0.5,
-                whiteSpace: "nowrap",
+                letterSpacing: "0.05em",
+                textTransform: "uppercase",
+                color: "var(--ink-soft)",
               }}
             >
-              Solve it →
-            </button>
+              Your problem
+            </span>
           </div>
 
-          {/* Symbol buttons */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-            {SYMBOLS.map((s) => (
-              <button
-                key={s.label}
-                type="button"
-                className="yp-sym"
-                aria-label={`Insert ${s.aria}`}
-                onClick={() => insertSymbol(s.insert)}
-                style={{
-                  border: "1px solid var(--line)",
-                  background: "var(--card)",
-                  borderRadius: 8,
-                  minWidth: 40,
-                  padding: "6px 10px",
-                  fontSize: 15,
-                  fontWeight: 700,
-                  color: "var(--ink)",
-                  cursor: "pointer",
-                }}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
+          <MathInput
+            ref={mathRef}
+            ariaLabel="Your problem"
+            onChange={(l) => {
+              latexRef.current = l;
+              setLatex(l);
+              setError(null);
+            }}
+            onSubmit={() => solve(latexRef.current)}
+          />
 
-          {/* Live preview / error */}
-          <div aria-live="polite" style={{ marginTop: 14, minHeight: 28 }}>
-            {error ? (
+          {/* Error */}
+          <div aria-live="polite">
+            {error && (
               <div
                 role="alert"
                 style={{
+                  marginTop: 14,
                   background: "rgba(226,87,76,0.07)",
                   border: "1px solid rgba(226,87,76,0.35)",
                   borderRadius: 10,
@@ -232,32 +137,49 @@ export default function YourProblemPage() {
                   color: "var(--ink)",
                 }}
               >
-                {error.latex && (
-                  <div style={{ marginBottom: 6, fontSize: 17 }}>
-                    <InlineMath math={error.latex} />
-                  </div>
-                )}
-                {error.message}
+                {error}
               </div>
-            ) : preview ? (
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-soft)" }}>I read this as:</span>
-                <span style={{ fontSize: 19 }}>
-                  <InlineMath math={preview} />
-                </span>
-              </div>
-            ) : null}
+            )}
           </div>
 
-          <p id="problem-help" style={{ margin: "10px 0 0", fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.6 }}>
-            Use <code style={{ fontFamily: "var(--font-mono)" }}>/</code> for fractions (
-            <code style={{ fontFamily: "var(--font-mono)" }}>x/4</code>,{" "}
-            <code style={{ fontFamily: "var(--font-mono)" }}>(2/3)x</code>). For a system, put a comma between the two
-            equations.
-          </p>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              marginTop: 16,
+            }}
+          >
+            <p style={{ margin: 0, fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.6, flex: "1 1 320px" }}>
+              Type <strong>/</strong> for a fraction and <strong>^</strong> for an exponent. For a system, put a
+              comma between the two equations. Press Enter to solve.
+            </p>
+            <button
+              type="button"
+              className="yp-solve"
+              disabled={isEmpty(latex)}
+              onClick={() => solve(latexRef.current)}
+              style={{
+                background: "var(--blue)",
+                color: "#fff",
+                border: "none",
+                borderRadius: 999,
+                padding: "12px 26px",
+                fontSize: 15,
+                fontWeight: 700,
+                cursor: isEmpty(latex) ? "default" : "pointer",
+                opacity: isEmpty(latex) ? 0.5 : 1,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Solve it →
+            </button>
+          </div>
 
           {/* Examples */}
-          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 12 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 14 }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", marginRight: 2 }}>Try:</span>
             {EXAMPLES.map((ex) => (
               <button
@@ -265,25 +187,25 @@ export default function YourProblemPage() {
                 type="button"
                 className="yp-chip"
                 onClick={() => {
-                  setText(ex);
+                  mathRef.current?.setValue(ex);
+                  latexRef.current = ex;
                   solve(ex);
                 }}
                 style={{
                   border: "1px solid var(--line)",
                   background: "var(--paper)",
                   borderRadius: 999,
-                  padding: "5px 12px",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 13,
+                  padding: "4px 12px",
+                  fontSize: 14,
                   color: "var(--ink)",
                   cursor: "pointer",
                 }}
               >
-                {ex}
+                <InlineMath math={ex} />
               </button>
             ))}
           </div>
-        </form>
+        </div>
       </div>
 
       {/* SOLVER */}

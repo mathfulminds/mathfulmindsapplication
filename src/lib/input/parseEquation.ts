@@ -101,7 +101,11 @@ function normalize(raw: string): string {
   s = s.replace(/\\(text|mathrm|mathit|mathbf|operatorname)\{([^}]*)\}/g, "$2");
 
   // Pure-presentation LaTeX that carries no math meaning.
-  s = s.replace(/\\left|\\right|\\displaystyle|\\big|\\Big|\\bigg|\\Bigg/g, "");
+  // An empty box the student hasn't filled in yet (from the math editor).
+  if (/\\placeholder/.test(s)) {
+    throw new InputError("There's still an empty box in the problem. Fill it in (or delete it), then try again.");
+  }
+  s = s.replace(/\\mleft|\\mright|\\left|\\right|\\displaystyle|\\big|\\Big|\\bigg|\\Bigg/g, "");
   s = s.replace(/\\[{}]/g, ""); // \{ \} - the big brace in front of a system
   s = s.replace(/\\(quad|qquad)/g, " ");
   s = s.replace(/\\[,;:! ]/g, " ");
@@ -169,8 +173,9 @@ function tokenize(s: string): Token[] {
         i = j;
         continue;
       }
-      if (cmd === "neq" || cmd === "ne") throw new InputError("\"Not equal to\" problems aren't supported yet.");
-      if (cmd === "sqrt") throw new InputError("Square roots aren't supported yet.");
+      if (cmd === "neq" || cmd === "ne") throw new InputError("\"Not equal to\" (≠) problems aren't supported yet. Right now you can solve linear equations, linear inequalities, and systems of two linear equations.");
+      if (cmd === "sqrt") throw new InputError("Square roots and other roots aren't supported yet. Right now you can solve linear equations, linear inequalities, and systems of two linear equations.");
+      if (cmd === "pi") throw new InputError("Problems with π aren't supported yet. Right now you can solve linear equations, linear inequalities, and systems of two linear equations.");
       if (cmd === "pm" || cmd === "mp") throw new InputError("The ± symbol isn't supported here.");
       throw new InputError(cmd ? `I don't recognize "\\${cmd}".` : "There's a stray backslash in the problem.");
     }
@@ -219,8 +224,8 @@ function tokenize(s: string): Token[] {
       i += s[i + 1] === "=" ? 2 : 1; // tolerate "=="
       continue;
     }
-    if (c === "^") throw new InputError("Exponents aren't supported yet - only linear equations and inequalities.");
-    if (c === "|") throw new InputError("Absolute value isn't supported yet.");
+    if (c === "^") throw new InputError("Exponents aren't supported yet. Right now you can solve linear equations, linear inequalities, and systems of two linear equations.");
+    if (c === "|") throw new InputError("Absolute value isn't supported yet. Right now you can solve linear equations, linear inequalities, and systems of two linear equations.");
     if (c === "!") throw new InputError("\"Not equal to\" problems aren't supported yet.");
     throw new InputError(`I don't recognize the symbol "${c}".`);
   }
