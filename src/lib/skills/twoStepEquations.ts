@@ -200,23 +200,21 @@ export function buildSolverInstance(
       { text: `${-a}`, tag: "sign_error" },
     ];
   } else {
+    // The multiplier is placed on whichever side matches how the
+    // expression/constant already sit relative to the equals sign.
     const exprIsLeftOfEquals = orientation === "expressionLeft";
     const constantIsLeftOfEquals = orientation === "expressionRight";
-
     const multipliedVarTerm = exprIsLeftOfEquals
       ? `(${a})\\dfrac{${variableSymbol}}{${a}}`
       : `\\dfrac{${variableSymbol}}{${a}}(${a})`;
-    const multipliedConstant = constantIsLeftOfEquals
-      ? `(${a})(${newRhs})`
-      : `(${newRhs})(${a})`;
+    const multipliedConstant = constantIsLeftOfEquals ? `(${a})(${newRhs})` : `(${newRhs})(${a})`;
     const setupExpr1 = bIsSecond ? multipliedVarTerm : BLANK;
     const setupExpr2 = bIsSecond ? BLANK : multipliedVarTerm;
     stepBRow = { cells: assembleRow(setupExpr1, setupExpr2, multipliedConstant, orientation) };
     // Marked-paren-fraction: the outer multiplier and the fraction's own
     // denominator both get the x-mark, while the numerator (containing
     // the variable) stays unmarked.
-    const side = exprIsLeftOfEquals ? "L" : "R";
-    const multipliedVarTermMarked = `MARKEDPARENFRACTION:${side}\u0006${a}\u0006${variableSymbol}\u0005${a}`;
+    const multipliedVarTermMarked = `MARKEDPARENFRACTION:${exprIsLeftOfEquals ? "L" : "R"}\u0006${a}\u0006${variableSymbol}\u0005${a}`;
     const setupExpr1Marked = bIsSecond ? multipliedVarTermMarked : BLANK;
     const setupExpr2Marked = bIsSecond ? BLANK : multipliedVarTermMarked;
     stepBRowMarked = { cells: assembleRow(setupExpr1Marked, setupExpr2Marked, multipliedConstant, orientation) };

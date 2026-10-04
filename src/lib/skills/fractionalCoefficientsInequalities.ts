@@ -201,9 +201,11 @@ export function buildFractionSolverInstance(
   };
 
   // --- Step B: multiply by the reciprocal (flips iff the reciprocal is negative, i.e. iff n < 0) ---
-  const reciprocal = renderReciprocal(n, d);
+  // Side chosen via exprIsLeftOfEquals/constantIsLeftOfEquals so the
+  // reciprocal lands on the outer edge of the whole expression.
   const exprIsLeftOfEquals = orientation === "expressionLeft";
   const constantIsLeftOfEquals = orientation === "expressionRight";
+  const reciprocal = renderReciprocal(n, d);
 
   const multipliedVarTerm = exprIsLeftOfEquals
     ? `(${reciprocal})${renderFractionTerm(n, d, variableSymbol)}`

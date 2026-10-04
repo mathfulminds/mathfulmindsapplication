@@ -292,6 +292,9 @@ export function buildOneStepInstance(
       { text: `${-a}`, tag: "sign_error" },
     ];
   } else {
+    // The multiplier is placed on whichever side matches how the
+    // expression/constant already sit relative to the equals sign, so
+    // the new parentheses read naturally alongside the existing term.
     const exprIsLeftOfEquals = orientation === "expressionLeft";
     const constantIsLeftOfEquals = orientation === "expressionRight";
     const multipliedVarTerm = exprIsLeftOfEquals
@@ -303,8 +306,7 @@ export function buildOneStepInstance(
     // denominator both get the x-mark (same coefficient value canceling
     // via multiplication), while the numerator (containing the
     // variable) stays unmarked.
-    const side = exprIsLeftOfEquals ? "L" : "R";
-    const multipliedVarTermMarked = `MARKEDPARENFRACTION:${side}\u0006${a}\u0006${variableSymbol}\u0005${a}`;
+    const multipliedVarTermMarked = `MARKEDPARENFRACTION:${exprIsLeftOfEquals ? "L" : "R"}\u0006${a}\u0006${variableSymbol}\u0005${a}`;
     stepRowMarked = { cells: assembleRow(multipliedVarTermMarked, BLANK, multipliedConstant, orientation) };
     prompt = `What undoes dividing ${variableSymbol} by ${a}?`;
     choices = [

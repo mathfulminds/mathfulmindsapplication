@@ -98,11 +98,12 @@ export function buildFractionSolverInstance(
   };
 
   // Step 2: multiply both sides by the reciprocal - the genuinely new
-  // technique this skill is built around. Same "outer edge, away from
-  // the equals sign" placement rule established for divide-notation.
-  const reciprocal = renderReciprocal(n, d);
+  // technique this skill is built around. Side chosen via
+  // exprIsLeftOfEquals/constantIsLeftOfEquals so the reciprocal lands on
+  // the outer edge of the whole expression.
   const exprIsLeftOfEquals = orientation === "expressionLeft";
   const constantIsLeftOfEquals = orientation === "expressionRight";
+  const reciprocal = renderReciprocal(n, d);
 
   const multipliedVarTerm = exprIsLeftOfEquals
     ? `(${reciprocal})${renderFractionTerm(n, d, variableSymbol)}`

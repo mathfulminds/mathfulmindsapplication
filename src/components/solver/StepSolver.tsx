@@ -992,6 +992,74 @@ function EquationGrid({
     return "var(--ink)";
   }
 
+  // Renders every cell from every row this problem will EVER show
+  // (fullRows), invisibly, at zero height, overlapping row 1 - so CSS
+  // grid's own auto-column-sizing (which sizes each column from the
+  // intrinsic width of every cell sharing it, regardless of which row
+  // that cell is actually in) accounts for the full range of widths a
+  // column will ever need from the very first render. Without this,
+  // each column's width is computed only from whatever's been revealed
+  // SO FAR - so a later step revealing wider or narrower content in a
+  // column recomputes that column's width, visibly shifting everything
+  // already on screen in it. This fixes that at the root, using CSS
+  // grid's own native sizing mechanism rather than trying to compute or
+  // guess pixel widths by hand: multiple items can occupy the same grid
+  // cell position (they simply overlap), so placing every candidate
+  // width at gridRow 1 lets the browser's own layout engine pick
+  // whichever is actually widest, the same way it already does for
+  // currently-visible rows sharing a column - just extended to include
+  // rows that haven't appeared yet too. `visibility: hidden` (not
+  // display: none) is what keeps these participating in layout sizing
+  // while contributing nothing visible; `height: 0` on each cell is what
+  // keeps them from adding any vertical space of their own, even when
+  // their content (e.g. a stacked fraction) is taller than row 1's own
+  // actual content.
+  function renderSizingProbe(flowFullRows: (GridRow | PairedGridRow)[] | undefined) {
+    if (!flowFullRows) return null;
+    return flowFullRows.flatMap((row, rowIndex) => {
+      if (isPairedRow(row)) {
+        // A paired row's two equations (eq1/eq2) share the SAME column
+        // structure as every regular row in this same flow (that's what
+        // keeps a paired row's columns aligned with the rows around it
+        // to begin with) - both need to contribute their own widths to
+        // the probe, not just whichever a regular GridRow happens to be.
+        return [...row.eq1, ...row.eq2].map((cellValue, cellIdx) => (
+          <div
+            key={`probe-${rowIndex}-paired-${cellIdx}`}
+            aria-hidden="true"
+            style={{
+              gridRow: 1,
+              gridColumn: (cellIdx % row.eq1.length) + 1,
+              height: 0,
+              overflow: "hidden",
+              visibility: "hidden",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <Cell math={cellValue} color="var(--ink)" align={termAlign} />
+          </div>
+        ));
+      }
+      if (row.caption !== undefined) return [];
+      return row.cells.map((cellValue, colIndex) => (
+        <div
+          key={`probe-${rowIndex}-${colIndex}`}
+          aria-hidden="true"
+          style={{
+            gridRow: 1,
+            gridColumn: colIndex + 1,
+            height: 0,
+            overflow: "hidden",
+            visibility: "hidden",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <Cell math={cellValue} color="var(--ink)" align={termAlign} />
+        </div>
+      ));
+    });
+  }
+
   // Renders one flow of rows (the whole problem normally, or ONE track's
   // slice of it in two-track mode) into the flat cell array a CSS grid
   // needs. Pulled out so it can be called once for the normal case or
@@ -1247,7 +1315,16 @@ function EquationGrid({
     );
 
     // The SAME split, applied to every row this problem will EVER show
-    // (fullRows/fullSlotIds), not just what's revealed so far - this is
+    // (fullRows/fullSlotIds), not just what's revealed so far - each
+    // track gets its own genuinely independent column-width calculation
+    // (a separate grid per track), so each one needs its own full-row
+    // split fed into its own sizing probe below, not one shared set.
+    const {
+      left: fullLeftRows,
+      right: fullRightRows,
+      rest: fullUnassignedRows,
+    } = splitByTrack(fullRows ?? [], fullSlotIds ?? []);
+
     return (
       <div style={{ overflowX: "auto", width: "100%", paddingTop: 14, paddingBottom: 4 }}>
         <div ref={outerRef} style={{ position: "relative" }}>
@@ -1266,6 +1343,7 @@ function EquationGrid({
                 flexShrink: 0,
               }}
             >
+              {renderSizingProbe(fullLeftRows)}
               {renderRowFlow(leftRows, leftIds)}
             </div>
             <div
@@ -1279,6 +1357,7 @@ function EquationGrid({
                 flexShrink: 0,
               }}
             >
+              {renderSizingProbe(fullRightRows)}
               {renderRowFlow(rightRows, rightIds)}
             </div>
           </div>
@@ -1294,6 +1373,7 @@ function EquationGrid({
                 marginTop: 20,
               }}
             >
+              {renderSizingProbe(fullUnassignedRows)}
               {renderRowFlow(unassignedRows, unassignedIds)}
             </div>
           )}
@@ -1317,6 +1397,7 @@ function EquationGrid({
           position: "relative",
         }}
       >
+        {renderSizingProbe(fullRows)}
         {connectorsToRender.map((rc, i) => (
           <RowConnector key={i} containerRef={outerRef} fromSlotId={rc.fromSlotId} toSlotId={rc.toSlotId} />
         ))}
@@ -1417,23 +1498,12 @@ export default function StepSolver({
 
   const visibleRows: (GridRow | PairedGridRow)[] = slotOrder.map((id) => slotContent[id]);
 
-  // A second, UNGATED pass - applies every step's row updates
-  // regardless of progress, purely so the two-track layout can know the
-  // widest content a column will EVER hold (not just what's revealed so
-  // far) and lock that width in from the start. Without this, a grid
-  // column that auto-sizes to its current content visibly grows wider
-  // every time a later step reveals something wider, which drags
-  // everything already written in that column sideways with it - the
-  // opposite of what "looks like something written by hand" means.
-  const fullSlotOrder: string[] = ["__initial__"];
-  const fullSlotContent: Record<string, GridRow | PairedGridRow> = { __initial__: instance.initialRow };
-  for (const step of instance.steps) {
-    for (const update of step.rowUpdates) {
-      if (!(update.slotId in fullSlotContent)) fullSlotOrder.push(update.slotId);
-      fullSlotContent[update.slotId] = update.row;
-    }
-  }
-  const fullRows: (GridRow | PairedGridRow)[] = fullSlotOrder.map((id) => fullSlotContent[id]);
+  // NOTE: the equation-recentering ("spacing") work - a sizing-probe pass
+  // that pre-computed every row a problem would ever show, so grid columns
+  // wouldn't resize (and shift content) as later steps revealed wider
+  // content - is paused for now. EquationGrid below is no longer passed
+  // fullRows/fullSlotIds, so it falls back to sizing columns only from
+  // what's currently revealed, same as before that work started.
 
   let boldActiveSlotId: string | null = null;
   if (instance.boldAfter) {
@@ -1664,8 +1734,10 @@ export default function StepSolver({
         </div>
         <EquationGrid
           rows={visibleRows}
-          fullRows={fullRows}
-          fullSlotIds={fullSlotOrder}
+          // Equation-recentering ("spacing") work is paused for now -
+          // not passing fullRows/fullSlotIds disables the sizing-probe
+          // mechanism below (it returns null without rows), restoring
+          // the original column-sizing behavior while this is revisited.
           boldSlotId={boldActiveSlotId}
           slotIds={slotOrder}
           eqColumnIndex={instance.eqColumnIndex}

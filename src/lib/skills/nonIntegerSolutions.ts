@@ -199,9 +199,9 @@ export function buildNonIntegerSolverInstance(
     // variable term gets its own parens too, matching the constant
     // side's own treatment via renderParenMult - a bare "(recip)-4x"
     // string reads visually as subtraction, not multiplication, once
-    // the variable term's own coefficient is negative. The argument
-    // order itself flips with exprIsLeftOfEquals/constantIsLeftOfEquals,
-    // putting the reciprocal on the OUTER edge of the whole row.
+    // the variable term's own coefficient is negative. Side chosen via
+    // exprIsLeftOfEquals/constantIsLeftOfEquals so the reciprocal lands
+    // on the outer edge of the whole expression.
     const multipliedVarTerm = exprIsLeftOfEquals
       ? `PARENMULT:${reciprocal}\u0007${variableTermNatural}`
       : `PARENMULT:${variableTermNatural}\u0007${reciprocal}`;
@@ -216,8 +216,7 @@ export function buildNonIntegerSolverInstance(
     // together, once confirm_coefficient_one confirms that - not before.
     // Only the variable side needs a mark; the constant side is just a
     // computed result, same as the divide-form case elsewhere never
-    // marks its own rhs either. MARKEDPARENMULTR: (reversed) matches
-    // multipliedVarTerm's own argument-order flip above.
+    // marks its own rhs either. Side matches multipliedVarTerm above.
     const multipliedVarTermMarked = exprIsLeftOfEquals
       ? `MARKEDPARENMULT:${a}\u0006${variableSymbol}`
       : `MARKEDPARENMULTR:${a}\u0006${variableSymbol}`;

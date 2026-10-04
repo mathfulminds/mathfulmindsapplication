@@ -393,14 +393,14 @@ export function buildOneStepInstance(
     ];
   } else {
     opWord = "multiplying";
+    // The multiplier is placed on whichever side matches how the
+    // expression/constant already sit relative to the inequality sign.
     const exprIsLeftOfEquals = orientation === "expressionLeft";
     const constantIsLeftOfEquals = orientation === "expressionRight";
-    // Unmarked/marked pair, same reasoning as the multiply-form branch.
     const multipliedVarTermUnmarked = exprIsLeftOfEquals
       ? `(${a})\\dfrac{${variableSymbol}}{${a}}`
       : `\\dfrac{${variableSymbol}}{${a}}(${a})`;
-    const side = exprIsLeftOfEquals ? "L" : "R";
-    const multipliedVarTermMarked = `MARKEDPARENFRACTION:${side}\u0006${a}\u0006${variableSymbol}\u0005${a}`;
+    const multipliedVarTermMarked = `MARKEDPARENFRACTION:${exprIsLeftOfEquals ? "L" : "R"}\u0006${a}\u0006${variableSymbol}\u0005${a}`;
     const multipliedConstant = constantIsLeftOfEquals ? `(${a})(${rhs})` : `(${rhs})(${a})`;
     stepRow = { cells: assembleRow(multipliedVarTermUnmarked, BLANK, multipliedConstant, orientation, origSymbol) };
     stepRowMarked = {

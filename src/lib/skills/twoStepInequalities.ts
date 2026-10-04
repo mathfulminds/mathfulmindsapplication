@@ -319,8 +319,6 @@ export function buildSolverInstance(
     stepBExplanation = `Undo multiplication by dividing both sides by ${a}.`;
   } else {
     opWord = "multiplying";
-    const exprIsLeftOfEquals = orientation === "expressionLeft";
-    const constantIsLeftOfEquals = orientation === "expressionRight";
 
     // Marked-paren-fraction format: the outer multiplier and the
     // fraction's own denominator both get the x-mark (same coefficient
@@ -328,15 +326,16 @@ export function buildSolverInstance(
     // (containing the variable) stays unmarked. Unmarked variant used
     // for eliminate_coefficient's own reveal - the marked version is
     // added to this same line by confirmCoefficientOne instead, same
-    // reasoning as the multiply-form branch above.
+    // reasoning as the multiply-form branch above. The multiplier is
+    // placed on whichever side matches how the expression/constant
+    // already sit relative to the inequality sign.
+    const exprIsLeftOfEquals = orientation === "expressionLeft";
+    const constantIsLeftOfEquals = orientation === "expressionRight";
     const multipliedVarTermUnmarked = exprIsLeftOfEquals
       ? `(${a})\\dfrac{${variableSymbol}}{${a}}`
       : `\\dfrac{${variableSymbol}}{${a}}(${a})`;
-    const side = exprIsLeftOfEquals ? "L" : "R";
-    const multipliedVarTermMarked = `MARKEDPARENFRACTION:${side}\u0006${a}\u0006${variableSymbol}\u0005${a}`;
-    const multipliedConstant = constantIsLeftOfEquals
-      ? `(${a})(${newRhs})`
-      : `(${newRhs})(${a})`;
+    const multipliedVarTermMarked = `MARKEDPARENFRACTION:${exprIsLeftOfEquals ? "L" : "R"}\u0006${a}\u0006${variableSymbol}\u0005${a}`;
+    const multipliedConstant = constantIsLeftOfEquals ? `(${a})(${newRhs})` : `(${newRhs})(${a})`;
     const setupExpr1 = bIsSecond ? multipliedVarTermUnmarked : BLANK;
     const setupExpr2 = bIsSecond ? BLANK : multipliedVarTermUnmarked;
     stepBRow = { cells: assembleRow(setupExpr1, setupExpr2, multipliedConstant, orientation, origSymbol) };
