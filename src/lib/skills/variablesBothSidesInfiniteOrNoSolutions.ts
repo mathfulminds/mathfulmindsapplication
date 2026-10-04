@@ -10,7 +10,10 @@ interface EquationInstance {
 
 export function generateEquation(): EquationInstance {
   const a = randInt(2, 9) * (randBool() ? 1 : -1);
-  const bLeft = randInt(-20, 20);
+  // Neither constant can be 0 - both sides always render as "ax + b",
+  // so a 0 would show up as a literal "+ 0" term.
+  let bLeft = randInt(-20, 20);
+  while (bLeft === 0) bLeft = randInt(-20, 20);
 
   const isIdentity = randBool();
   let bRight: number;
@@ -18,7 +21,7 @@ export function generateEquation(): EquationInstance {
     bRight = bLeft;
   } else {
     let diff = randInt(1, 15) * (randBool() ? 1 : -1);
-    while (diff === 0) diff = randInt(1, 15) * (randBool() ? 1 : -1);
+    while (diff === 0 || bLeft + diff === 0) diff = randInt(1, 15) * (randBool() ? 1 : -1);
     bRight = bLeft + diff;
   }
 

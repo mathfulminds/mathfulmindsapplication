@@ -84,6 +84,12 @@ export function generateSubstitution(): SubstitutionInstance {
     const c1 = a1 * x0 + b1 * y0;
     const d2 = a2 * x0 + b2 * y0;
 
+    // The isolated equation's right side can't be 0: it becomes the
+    // constant in the two-step equation solved later, and a constant of
+    // 0 leaves that step with no distinct wrong answers to offer (this
+    // crashed about 1 in 100 generated problems).
+    if ((isolateEq === 1 ? c1 : d2) === 0) continue;
+
     return { a1, b1, c1, a2, b2, d2, isolateEq, isolateVar, x0, y0 };
   }
   // Extremely unlikely fallback.

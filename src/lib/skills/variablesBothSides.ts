@@ -20,7 +20,14 @@ export function generateEquation(): EquationInstance {
   let solution = randInt(-12, 12);
   while (solution === 0) solution = randInt(-12, 12);
 
-  const bRight = (aLeft - aRight) * solution + bLeft;
+  let bRight = (aLeft - aRight) * solution + bLeft;
+  // bRight = 0 would render as "+ 0" on the right side - re-pick the
+  // solution (bRight is 0 for exactly one solution value, so this ends fast).
+  while (bRight === 0) {
+    solution = randInt(-12, 12);
+    while (solution === 0) solution = randInt(-12, 12);
+    bRight = (aLeft - aRight) * solution + bLeft;
+  }
 
   return { aLeft, aRight, bLeft, bRight, solution };
 }

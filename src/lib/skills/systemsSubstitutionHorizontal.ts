@@ -19,7 +19,15 @@ import { generateSubstitution, buildSubstitutionSolverInstance } from "./systems
 // 100,000-case scale there. This file only restructures how that SAME
 // data gets grouped into tracks; it computes no math of its own.
 export function generateSubstitutionInstanceTwoTrack(): SolverInstance {
-  const inst = generateSubstitution();
+  return buildSubstitutionInstanceTwoTrack(generateSubstitution());
+}
+
+// Same two-track restructuring, for a specific system rather than a
+// randomly generated one - used by the "solve your own problem" page,
+// where the numbers come from what the student typed.
+export function buildSubstitutionInstanceTwoTrack(
+  inst: Parameters<typeof buildSubstitutionSolverInstance>[0]
+): SolverInstance {
   const base = buildSubstitutionSolverInstance(inst);
 
   const isolateSlotIds = [

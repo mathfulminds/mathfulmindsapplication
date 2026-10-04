@@ -440,6 +440,16 @@ export function buildNonIntegerSolverInstance(
     const unreduced: Fraction = { num: simplifiedRhs.num, den: simplifiedRhs.den * a };
     thirdChoiceText = `${variableSymbol} = $${fractionToKatex(unreduced)}$`;
     thirdChoiceTag = "forgot_to_reduce_fraction";
+    // When there's nothing to reduce (e.g. 3x = 7 -> 7/3), the "forgot to
+    // reduce" version is identical to the correct answer. Problems a
+    // student types in hit this all the time (the random generator avoids
+    // it), so fall back to the flipped fraction - dividing in the wrong
+    // order (7/3 -> 3/7) is a real, common mistake of its own.
+    if (fractionToKatex(unreduced) === fractionToKatex(solution)) {
+      const flipped = makeFraction(solution.den, solution.num);
+      thirdChoiceText = `${variableSymbol} = $${fractionToKatex(flipped)}$`;
+      thirdChoiceTag = "divided_in_wrong_order";
+    }
   } else {
     thirdChoiceText = terminatesAsDecimal(solution)
       ? `${variableSymbol} = $${decimalOffByOneKatex(solution)}$`

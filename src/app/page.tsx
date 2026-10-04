@@ -1,11 +1,13 @@
 import Image from 'next/image'
+import Link from 'next/link'
 import StepDemo from '@/components/StepDemo'
 
-const inputOptions = [
+const inputOptions: { title: string; body: string; color: string; href?: string }[] = [
   {
     title: 'Type it',
     body: 'Use a friendly equation builder to type any expression, formula, or word problem.',
     color: 'var(--blue)',
+    href: '/solve/your-problem',
   },
   {
     title: 'Upload it',
@@ -67,15 +69,17 @@ export default function HomePage() {
           gap: 16,
         }}
       >
-        {inputOptions.map((opt) => (
+        {inputOptions.map((opt) => {
+          const card = (
           <div
-            key={opt.title}
             style={{
               background: 'var(--card)',
               border: '1px solid var(--line)',
               borderRadius: 14,
               padding: '22px 18px',
               borderTop: `3px solid ${opt.color}`,
+              height: '100%',
+              boxSizing: 'border-box',
             }}
           >
             <h3
@@ -91,8 +95,23 @@ export default function HomePage() {
             <p style={{ margin: 0, fontSize: 14, color: 'var(--ink-soft)', lineHeight: 1.5 }}>
               {opt.body}
             </p>
+            {opt.href && (
+              <p style={{ margin: '10px 0 0', fontSize: 14, fontWeight: 700, color: opt.color }}>
+                Try it now →
+              </p>
+            )}
           </div>
-        ))}
+          )
+          // Cards with a live page link to it; the others are still
+          // descriptions of what's coming.
+          return opt.href ? (
+            <Link key={opt.title} href={opt.href} style={{ textDecoration: 'none', color: 'inherit' }}>
+              {card}
+            </Link>
+          ) : (
+            <div key={opt.title}>{card}</div>
+          )
+        })}
       </section>
 
       {/* SIGNATURE DEMO */}
