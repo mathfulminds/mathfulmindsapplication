@@ -2,6 +2,8 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
+import { InlineMath } from "react-katex";
+import "katex/dist/katex.min.css";
 import StepSolver from "@/components/solver/StepSolver";
 import MathInput from "@/components/MathInput";
 import type { MathInputHandle } from "@/components/MathInput";
@@ -25,6 +27,37 @@ interface LoadedExample {
   instance: SolverInstance;
 }
 
+// What to press on the keyboard, styled like a key cap.
+function Key({ children }: { children: string }) {
+  return (
+    <kbd
+      style={{
+        fontFamily: "var(--font-mono)",
+        fontSize: 12.5,
+        fontWeight: 600,
+        color: "var(--ink)",
+        background: "var(--paper)",
+        border: "1px solid var(--line)",
+        borderBottomWidth: 2,
+        borderRadius: 6,
+        padding: "1px 7px",
+        margin: "0 2px",
+      }}
+    >
+      {children}
+    </kbd>
+  );
+}
+
+// A small piece of rendered math inside a sentence.
+function MathBit({ latex }: { latex: string }) {
+  return (
+    <span style={{ color: "var(--ink)", fontSize: 15, display: "inline-block", verticalAlign: "middle" }}>
+      <InlineMath math={latex} />
+    </span>
+  );
+}
+
 interface Solved {
   id: number; // bumps on every solve, so StepSolver remounts fresh
   result: Extract<RouteResult, { ok: true }>;
@@ -36,6 +69,10 @@ export default function YourProblemPage() {
   const [optionIndex, setOptionIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [example, setExample] = useState<LoadedExample | null>(null);
+  // Skill picker: closed, showing the three categories, or showing one
+  // category's skills (by its label).
+  const [picker, setPicker] = useState<"closed" | "categories" | string>("closed");
+  const openGroup = SKILL_GROUPS.find((g) => g.label === picker) ?? null;
   const mathRef = useRef<MathInputHandle>(null);
   const latexRef = useRef("");
   const solveCount = useRef(0);
@@ -84,7 +121,9 @@ export default function YourProblemPage() {
   return (
     <div style={{ maxWidth: wide ? 1300 : 900, margin: "0 auto", padding: "48px 24px 80px" }}>
       <style>{`
-        .yp-skill:hover { border-color: var(--group-color) !important; }
+        .yp-skill:hover, .yp-category:hover { border-color: var(--group-color) !important; }
+        .yp-category:hover { background: var(--paper) !important; }
+        .yp-topic:hover { box-shadow: 0 0 0 3px rgba(46,111,163,0.15); }
         .yp-solve:hover:not(:disabled) { background: var(--blue-dark) !important; }
       `}</style>
 
@@ -174,10 +213,15 @@ export default function YourProblemPage() {
               marginTop: 16,
             }}
           >
-            <p style={{ margin: 0, fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.6, flex: "1 1 320px" }}>
-              Type <strong>/</strong> for a fraction and <strong>^</strong> for an exponent. For a system, put a
-              comma between the two equations. Press Enter to solve.
-            </p>
+            <div style={{ fontSize: 13.5, color: "var(--ink-soft)", lineHeight: 1.5, flex: "1 1 320px" }}>
+              <p style={{ margin: "0 0 8px" }}>
+                Use <Key>/</Key> for a fraction. Example: for <MathBit latex={"\\frac{1}{2}"} />, type <Key>1/2</Key>
+              </p>
+              <p style={{ margin: "0 0 8px" }}>
+                Use <Key>^</Key> for an exponent. Example: for <MathBit latex="x^2" />, type <Key>x^2</Key>
+              </p>
+              <p style={{ margin: 0 }}>For a system, put a comma between the two equations. Press Enter to solve.</p>
+            </div>
             <button
               type="button"
               className="yp-solve"
@@ -200,62 +244,139 @@ export default function YourProblemPage() {
             </button>
           </div>
 
-          {/* Skill picker */}
+          {/* Skill picker: topic -> category -> skill */}
           <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid var(--line)" }}>
-            <p style={{ margin: "0 0 2px", fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>
-              Or start from a skill
+            <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--ink-soft)" }}>
+              Or start from a skill: pick one to load an example problem you can change before solving.
             </p>
-            <p style={{ margin: "0 0 14px", fontSize: 13, color: "var(--ink-soft)" }}>
-              Pick a skill to load an example problem. Change it if you like, then press Solve. Pick the same skill
-              again for a new example.
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {SKILL_GROUPS.map((g) => (
-                <div key={g.label}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 999, background: g.color }} />
-                    <span
-                      style={{
-                        fontFamily: "var(--font-display)",
-                        fontWeight: 700,
-                        fontSize: 15,
-                        color: "var(--ink)",
-                      }}
-                    >
-                      {g.label}
+            <button
+              type="button"
+              className="yp-topic"
+              aria-expanded={picker !== "closed"}
+              onClick={() => setPicker(picker === "closed" ? "categories" : "closed")}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                border: "1.5px solid var(--blue)",
+                background: picker !== "closed" ? "var(--blue)" : "var(--card)",
+                color: picker !== "closed" ? "#fff" : "var(--blue)",
+                borderRadius: 999,
+                padding: "8px 18px",
+                fontSize: 14,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              Equations / Inequalities
+              <span
+                aria-hidden="true"
+                style={{
+                  display: "inline-block",
+                  transition: "transform 0.15s ease",
+                  transform: picker !== "closed" ? "rotate(180deg)" : "none",
+                  fontSize: 11,
+                }}
+              >
+                ▼
+              </span>
+            </button>
+
+            {picker === "categories" && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                  gap: 10,
+                  marginTop: 14,
+                }}
+              >
+                {SKILL_GROUPS.map((g) => (
+                  <button
+                    key={g.label}
+                    type="button"
+                    className="yp-category"
+                    onClick={() => setPicker(g.label)}
+                    style={{
+                      ["--group-color" as string]: g.color,
+                      textAlign: "left",
+                      background: "var(--card)",
+                      border: "1px solid var(--line)",
+                      borderTop: `3px solid ${g.color}`,
+                      borderRadius: 12,
+                      padding: "14px 16px",
+                      cursor: "pointer",
+                      color: "var(--ink)",
+                    }}
+                  >
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 999, background: g.color, flexShrink: 0 }} />
+                      <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16 }}>{g.label}</span>
                     </span>
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {g.skills.map((sk) => {
-                      const active = activeExample?.skill.id === sk.skill.id;
-                      return (
-                        <button
-                          key={sk.skill.id}
-                          type="button"
-                          className="yp-skill"
-                          aria-pressed={active}
-                          onClick={() => loadExample(sk)}
-                          style={{
-                            ["--group-color" as string]: g.color,
-                            border: `1px solid ${active ? g.color : "var(--line)"}`,
-                            background: active ? g.color : "var(--paper)",
-                            color: active ? "#fff" : "var(--ink)",
-                            borderRadius: 999,
-                            padding: "6px 14px",
-                            fontSize: 13,
-                            fontWeight: 700,
-                            cursor: "pointer",
-                            textAlign: "left",
-                          }}
-                        >
-                          {sk.title}
-                        </button>
-                      );
-                    })}
-                  </div>
+                    <span style={{ display: "block", marginTop: 4, fontSize: 12.5, color: "var(--ink-soft)" }}>
+                      {g.skills.length} skills
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {openGroup && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    onClick={() => setPicker("categories")}
+                    style={{
+                      border: "none",
+                      background: "none",
+                      padding: 0,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: "var(--blue)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    ← Back
+                  </button>
+                  <span style={{ fontSize: 13, color: "var(--ink-soft)" }}>
+                    Equations / Inequalities ›{" "}
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ width: 7, height: 7, borderRadius: 999, background: openGroup.color }} />
+                      <strong style={{ color: "var(--ink)" }}>{openGroup.label}</strong>
+                    </span>
+                  </span>
                 </div>
-              ))}
-            </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {openGroup.skills.map((sk) => {
+                    const active = activeExample?.skill.id === sk.skill.id;
+                    return (
+                      <button
+                        key={sk.skill.id}
+                        type="button"
+                        className="yp-skill"
+                        aria-pressed={active}
+                        onClick={() => loadExample(sk)}
+                        style={{
+                          ["--group-color" as string]: openGroup.color,
+                          border: `1px solid ${active ? openGroup.color : "var(--line)"}`,
+                          background: active ? openGroup.color : "var(--paper)",
+                          color: active ? "#fff" : "var(--ink)",
+                          borderRadius: 999,
+                          padding: "7px 14px",
+                          fontSize: 13,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          textAlign: "left",
+                        }}
+                      >
+                        {sk.title}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

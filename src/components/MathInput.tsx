@@ -223,6 +223,13 @@ const MathInput = forwardRef<MathInputHandle, Props>(function MathInput({ onChan
           const style = document.createElement("style");
           style.setAttribute("data-mm-ne", "");
           style.textContent = `
+            /* Room above and below the math, so a selected box at the top of
+               a fraction (or a tall exponent) never gets its edge clipped -
+               Safari measures the math font slightly taller than Chrome. */
+            .ML__content {
+              padding-top: 10px !important;
+              padding-bottom: 10px !important;
+            }
             .mm-ne { position: relative; display: inline-block; }
             .mm-ne::after {
               content: "";
@@ -297,7 +304,7 @@ const MathInput = forwardRef<MathInputHandle, Props>(function MathInput({ onChan
           box-sizing: border-box;
           min-height: 64px;
           font-size: 26px;
-          padding: 10px 14px;
+          padding: 2px 14px;
           border: 1.5px solid var(--line);
           border-radius: 10px;
           background: var(--paper);
