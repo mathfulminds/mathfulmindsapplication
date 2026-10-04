@@ -149,7 +149,12 @@ interface Built {
 
 // Terms the builders would have to draw as "+ 0" or "0x".
 function checkNoZeroTerms(eq: ParsedEquation) {
-  const terms = [...eq.left, ...eq.right].flatMap((t) => (isParen(t) ? t.inner : [t]));
+  // A side that is just "0" (like 2x - 6 = 0) is fine - it's only a 0
+  // sitting alongside other terms ("x + 0", "0x") that can't be drawn.
+  const loneZero = (side: SurfaceTerm[]) => side.length === 1 && isConst(side[0]) && isZero(side[0].value);
+  const terms = [...eq.left, ...eq.right]
+    .filter((t, i, all) => !(loneZero(i < eq.left.length ? eq.left : eq.right) && all.length > 1 && isConst(t) && isZero(t.value)))
+    .flatMap((t) => (isParen(t) ? t.inner : [t]));
   if (terms.some((t) => (isConst(t) && isZero(t.value)) || (isVar(t) && isZero(t.coef))) || [...eq.left, ...eq.right].some((t) => isParen(t) && isZero(t.m))) {
     fail("There's a term equal to 0 in the problem (like + 0 or 0x). Remove it and try again.");
   }
@@ -291,7 +296,11 @@ function routeSingle(eq: ParsedEquation): Built {
     // multiply form: ax + b = c
     const a = term.coef;
     const halfCoef = a.den === 2 && term.coefStyle === "decimal";
-    if ((isInt(a) || halfCoef) && allInt && isInt(solution)) {
+    // Same numbers the two-step generator uses: whole-number or ".5"
+    // coefficient, whole-number constant, and (with a ".5" coefficient) a
+    // right side that can end in .5 too.
+    const cOK = allInt || (halfCoef && isInt(b) && constTerm.style === "int" && c.den <= 2 && (isInt(c) || (C[0] as ConstTerm).style === "decimal"));
+    if ((isInt(a) || halfCoef) && cOK && isInt(solution)) {
       const inst = { a: val(a), b: val(b), form: "multiply" as const, variableFirst, orientation, rhs: val(c) };
       return isIneq
         ? { skill: SKILLS.twoStepIneq, instance: buildTwoStepIneq({ ...inst, boundary: val(solution), origSymbol: symbol! }, v) }
@@ -582,9 +591,6 @@ function routeSystem(eqs: ParsedEquation[]): SolveOption[] {
   const y0 = val(yF);
   if (x0 === 0 || y0 === 0) {
     fail("Systems where x or y equals 0 aren't supported yet. The steps check your work partly by each value's sign, and 0 doesn't have one.");
-  }
-  for (const r of rows) {
-    if (r.c === 0) fail("Systems with 0 on the right side of an equation aren't supported yet.");
   }
 
   const options: SolveOption[] = [];

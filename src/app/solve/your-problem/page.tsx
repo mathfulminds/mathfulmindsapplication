@@ -2,27 +2,28 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { InlineMath } from "react-katex";
-import "katex/dist/katex.min.css";
 import StepSolver from "@/components/solver/StepSolver";
 import MathInput from "@/components/MathInput";
 import type { MathInputHandle } from "@/components/MathInput";
 import { routeInput } from "@/lib/input/routeEquation";
-import type { RouteResult } from "@/lib/input/routeEquation";
+import type { RouteResult, SkillInfo } from "@/lib/input/routeEquation";
+import { SKILL_GROUPS, exampleLatex } from "@/lib/input/skillExamples";
+import type { SkillExample } from "@/lib/input/skillExamples";
+import type { SolverInstance } from "@/lib/skills/types";
 
 // "Solve your own problem": a student types (or, later, photographs) any
 // equation, inequality, or system, and it's routed to the matching skill's
 // step-by-step solver - see src/lib/input/ for how parsing and routing work.
 
-// LaTeX, since the math field displays (and returns) LaTeX.
-const EXAMPLES = [
-  "3x+5=11",
-  "\\frac{x}{4}=5",
-  "-2\\left(3x-1\\right)\\ge8",
-  "\\frac{2}{3}x+4=10",
-  "5x-3=2x+9",
-  "x+2y=7,\\;3x-2y=5",
-];
+// An example loaded from a skill button. If the student solves it without
+// changing anything, they get exactly that skill's generated problem; once
+// they edit it, it's routed like any typed problem.
+interface LoadedExample {
+  latex: string; // as the math field stores it
+  title: string;
+  skill: SkillInfo;
+  instance: SolverInstance;
+}
 
 interface Solved {
   id: number; // bumps on every solve, so StepSolver remounts fresh
@@ -34,6 +35,7 @@ export default function YourProblemPage() {
   const [solved, setSolved] = useState<Solved | null>(null);
   const [optionIndex, setOptionIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [example, setExample] = useState<LoadedExample | null>(null);
   const mathRef = useRef<MathInputHandle>(null);
   const latexRef = useRef("");
   const solveCount = useRef(0);
@@ -42,7 +44,14 @@ export default function YourProblemPage() {
 
   function solve(input: string) {
     if (isEmpty(input)) return;
-    const result = routeInput(input);
+    const result: RouteResult =
+      example && input === example.latex
+        ? {
+            ok: true,
+            latex: input,
+            options: [{ id: example.skill.id, label: example.skill.name, skill: example.skill, instance: example.instance }],
+          }
+        : routeInput(input);
     if (result.ok) {
       solveCount.current += 1;
       setSolved({ id: solveCount.current, result });
@@ -54,6 +63,19 @@ export default function YourProblemPage() {
     }
   }
 
+  function loadExample(ex: SkillExample) {
+    const instance = ex.generate();
+    const stored = mathRef.current?.setValue(exampleLatex(instance)) ?? exampleLatex(instance);
+    latexRef.current = stored;
+    setExample({ latex: stored, title: ex.title, skill: ex.skill, instance });
+    setSolved(null);
+    setError(null);
+    mathRef.current?.focus();
+  }
+
+  // The skill button stays highlighted while its example is untouched.
+  const activeExample = example && latex === example.latex ? example : null;
+
   const option = solved ? solved.result.options[Math.min(optionIndex, solved.result.options.length - 1)] : null;
   // The two-track substitution layout needs the same extra width its own
   // practice page gives it.
@@ -62,7 +84,7 @@ export default function YourProblemPage() {
   return (
     <div style={{ maxWidth: wide ? 1300 : 900, margin: "0 auto", padding: "48px 24px 80px" }}>
       <style>{`
-        .yp-chip:hover { border-color: var(--blue) !important; }
+        .yp-skill:hover { border-color: var(--group-color) !important; }
         .yp-solve:hover:not(:disabled) { background: var(--blue-dark) !important; }
       `}</style>
 
@@ -178,32 +200,62 @@ export default function YourProblemPage() {
             </button>
           </div>
 
-          {/* Examples */}
-          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 14 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", marginRight: 2 }}>Try:</span>
-            {EXAMPLES.map((ex) => (
-              <button
-                key={ex}
-                type="button"
-                className="yp-chip"
-                onClick={() => {
-                  mathRef.current?.setValue(ex);
-                  latexRef.current = ex;
-                  solve(ex);
-                }}
-                style={{
-                  border: "1px solid var(--line)",
-                  background: "var(--paper)",
-                  borderRadius: 999,
-                  padding: "4px 12px",
-                  fontSize: 14,
-                  color: "var(--ink)",
-                  cursor: "pointer",
-                }}
-              >
-                <InlineMath math={ex} />
-              </button>
-            ))}
+          {/* Skill picker */}
+          <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid var(--line)" }}>
+            <p style={{ margin: "0 0 2px", fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>
+              Or start from a skill
+            </p>
+            <p style={{ margin: "0 0 14px", fontSize: 13, color: "var(--ink-soft)" }}>
+              Pick a skill to load an example problem. Change it if you like, then press Solve. Pick the same skill
+              again for a new example.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {SKILL_GROUPS.map((g) => (
+                <div key={g.label}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 999, background: g.color }} />
+                    <span
+                      style={{
+                        fontFamily: "var(--font-display)",
+                        fontWeight: 700,
+                        fontSize: 15,
+                        color: "var(--ink)",
+                      }}
+                    >
+                      {g.label}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {g.skills.map((sk) => {
+                      const active = activeExample?.skill.id === sk.skill.id;
+                      return (
+                        <button
+                          key={sk.skill.id}
+                          type="button"
+                          className="yp-skill"
+                          aria-pressed={active}
+                          onClick={() => loadExample(sk)}
+                          style={{
+                            ["--group-color" as string]: g.color,
+                            border: `1px solid ${active ? g.color : "var(--line)"}`,
+                            background: active ? g.color : "var(--paper)",
+                            color: active ? "#fff" : "var(--ink)",
+                            borderRadius: 999,
+                            padding: "6px 14px",
+                            fontSize: 13,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            textAlign: "left",
+                          }}
+                        >
+                          {sk.title}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>

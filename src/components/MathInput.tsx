@@ -29,7 +29,7 @@ interface MathfieldLike extends HTMLElement {
 }
 
 export interface MathInputHandle {
-  setValue: (latex: string) => void;
+  setValue: (latex: string) => string; // returns the value as the field stores it
   focus: () => void;
 }
 
@@ -51,18 +51,15 @@ interface ToolButton {
   icon?: "notEqual"; // drawn as an SVG instead of a KaTeX label
 }
 
-// "≠" with a long slash that clearly crosses both bars (the standard math
-// font's slash is short and thin, and reads like a stray mark at button
-// size). Same stroke weight and rounded ends as the bars.
+// "≠" built from the exact same "=" the equals button shows, with a long
+// slash drawn across it - so its bars match the "=" button exactly. (The
+// math font's own ≠ has a short, thin slash that reads like a stray mark.)
+// The math field draws its ≠ the same way (see the mm-ne style below).
 function NotEqualIcon() {
   return (
-    <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true" style={{ display: "block" }}>
-      <g stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" fill="none">
-        <line x1="5" y1="9.5" x2="19" y2="9.5" />
-        <line x1="5" y1="14.5" x2="19" y2="14.5" />
-        <line x1="6.5" y1="20.5" x2="17.5" y2="3.5" />
-      </g>
-    </svg>
+    <span className="mm-ne-btn">
+      <InlineMath math="=" />
+    </span>
   );
 }
 const GROUPS: { name: string; buttons: ToolButton[] }[] = [
@@ -265,9 +262,10 @@ const MathInput = forwardRef<MathInputHandle, Props>(function MathInput({ onChan
   useImperativeHandle(ref, () => ({
     setValue(latex: string) {
       const f = fieldRef.current;
-      if (!f) return;
+      if (!f) return latex;
       f.value = latex;
       onChangeRef.current(f.value);
+      return f.value;
     },
     focus() {
       fieldRef.current?.focus();
@@ -339,6 +337,19 @@ const MathInput = forwardRef<MathInputHandle, Props>(function MathInput({ onChan
         .math-tool .katex { font-size: 1.05em; }
         .math-tool.small-math .katex { font-size: 0.9em; }
         .math-tool.frac-math .katex { font-size: 0.72em; }
+        .mm-ne-btn { position: relative; display: inline-block; line-height: 1; }
+        .mm-ne-btn::after {
+          content: "";
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          width: 0.046em;
+          height: 1.33em;
+          border-radius: 0.04em;
+          background: currentColor;
+          transform: translate(-50%, -45%) rotate(42deg);
+          pointer-events: none;
+        }
       `}</style>
 
       <div ref={hostRef} className="math-input-host" style={{ minHeight: 64 }}>
