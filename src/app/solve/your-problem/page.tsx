@@ -114,12 +114,10 @@ export default function YourProblemPage() {
   const activeExample = example && latex === example.latex ? example : null;
 
   const option = solved ? solved.result.options[Math.min(optionIndex, solved.result.options.length - 1)] : null;
-  // Same width as each skill's own practice page: 1300px for everything
-  // except elimination (whose page is still 900px).
-  const wide = !!option && option.skill.id !== "elimination";
-
   return (
-    <div style={{ maxWidth: wide ? 1300 : 900, margin: "0 auto", padding: "48px 24px 80px" }}>
+    // One width for the whole page - the input card and the solving card
+    // below it line up exactly, whichever skill the problem turns out to be.
+    <div style={{ maxWidth: 1300, margin: "0 auto", padding: "48px 24px 80px" }}>
       <style>{`
         .yp-skill:hover, .yp-category:hover { border-color: var(--group-color) !important; }
         .yp-category:hover { background: var(--paper) !important; }
@@ -127,10 +125,7 @@ export default function YourProblemPage() {
         .yp-solve:hover:not(:disabled) { background: var(--blue-dark) !important; }
       `}</style>
 
-      {/* 852 = the normal 900px page width minus its 24px side padding, so
-          the input card stays exactly where it was when a system switches
-          the page to the wider two-track layout. */}
-      <div style={{ maxWidth: 852, margin: "0 auto" }}>
+      <div>
         <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 30, marginBottom: 8 }}>
           Solve your own problem
         </h1>
