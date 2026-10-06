@@ -569,7 +569,7 @@ function renderStackedFraction(content: string, color: string): ReactNode {
 // be wider than whatever single width was phantom-matched).
 const LEFTALIGN_PREFIX = "LEFTALIGN:";
 
-function Cell({ math, color, align = "center" }: { math: string; color: string; align?: "center" | "right" }) {
+function Cell({ math, color, align = "center" }: { math: string; color: string; align?: "center" | "right" | "left" }) {
   const isLeftAlign = math.startsWith(LEFTALIGN_PREFIX);
   const content = isLeftAlign ? math.slice(LEFTALIGN_PREFIX.length) : math;
   const isPlainText = content.startsWith(PLAINTEXT_PREFIX);
@@ -947,6 +947,26 @@ type ComputedAnnotation = {
 // variant of it currently exists), so this single special case covers
 // every real usage without needing every skill file to pass its own
 // total column count explicitly.
+// Wraps one cell's math in bold - used for the row that turns bold
+// mid-problem (SolverInstance.boldAfter). Special-format cells are left
+// as-is, since their prefixes have to stay at the very start.
+function boldWrapCell(math: string): string {
+  if (
+    !math ||
+    math.startsWith(PLAINTEXT_PREFIX) ||
+    math.startsWith(STACKEDFRACTION_PREFIX) ||
+    math.startsWith(MARKEDTERM_PREFIX) ||
+    math.startsWith(MARKEDFRACTION_PREFIX) ||
+    math.startsWith(MARKEDPARENFRACTION_PREFIX) ||
+    math.startsWith(MARKEDPARENMULT_PREFIX) ||
+    math.startsWith(MARKEDPARENMULT_REVERSED_PREFIX) ||
+    math.startsWith(PARENMULT_PREFIX) ||
+    math.startsWith(LEFTALIGN_PREFIX)
+  )
+    return math;
+  return `\\boldsymbol{${math}}`;
+}
+
 function totalGridColumns(eqColumnIndex: number, columnCountOverride?: number): number {
   if (columnCountOverride !== undefined) return columnCountOverride;
   return eqColumnIndex === 1 ? 4 : eqColumnIndex + 2;
@@ -967,6 +987,7 @@ function EquationGrid({
   rowConnectors,
   pairedLayout,
   trackLayout,
+  arcReserveKeys,
 }: {
   rows: (GridRow | PairedGridRow)[];
   slotIds: string[];
@@ -982,8 +1003,14 @@ function EquationGrid({
   rowConnectors?: { fromSlotId: string; toSlotId: string }[];
   pairedLayout?: "sideBySide";
   trackLayout?: { leftSlotIds: string[]; rightSlotIds: string[] };
+  // "slotId|equation" for every row that will ever carry distribute arrows.
+  arcReserveKeys?: Set<string>;
 }) {
   const outerRef = useRef<HTMLDivElement | null>(null);
+
+  function alignFor(_colIndex: number): "center" | "right" | "left" {
+    return termAlign ?? "center";
+  }
 
   function colorFor(highlight: "success" | "phase-blue" | "phase-green" | "phase-red" | undefined): string {
     if (highlight === "success" || highlight === "phase-green") return "var(--green)";
@@ -1100,27 +1127,22 @@ function EquationGrid({
       // between the two equations of a pair specifically, without
       // touching the grid's own rowGap (which stays uniform for every
       // other row boundary).
-      function boldWrap(math: string): string {
-        if (
-          !math ||
-          math.startsWith(PLAINTEXT_PREFIX) ||
-          math.startsWith(STACKEDFRACTION_PREFIX) ||
-          math.startsWith(MARKEDTERM_PREFIX) ||
-          math.startsWith(MARKEDFRACTION_PREFIX) ||
-          math.startsWith(MARKEDPARENFRACTION_PREFIX) ||
-          math.startsWith(MARKEDPARENMULT_PREFIX) ||
-          math.startsWith(MARKEDPARENMULT_REVERSED_PREFIX) ||
-          math.startsWith(PARENMULT_PREFIX) ||
-          math.startsWith(LEFTALIGN_PREFIX)
-        )
-          return math;
-        return `\\boldsymbol{${math}}`;
-      }
+      const boldWrap = boldWrapCell;
 
-      function renderCells(cells: readonly string[], rowKey: string, color: string, slotIdForRow: string | undefined, marginBottom?: number) {
+      function renderCells(
+        cells: readonly string[],
+        rowKey: string,
+        color: string,
+        slotIdForRow: string | undefined,
+        marginBottom?: number,
+        padTop: number = 0
+      ) {
         const isBold = !!slotIdForRow && slotIdForRow === boldSlotId;
         return cells.map((cellValue, colIndex) => {
-          const style = marginBottom !== undefined ? { marginBottom } : undefined;
+          const style =
+            marginBottom !== undefined || padTop
+              ? { ...(marginBottom !== undefined ? { marginBottom } : {}), ...(padTop ? { paddingTop: padTop } : {}) }
+              : undefined;
           const displayValue = isBold ? boldWrap(cellValue) : cellValue;
           if (colIndex === eqColumnIndex) {
             return (
@@ -1141,7 +1163,7 @@ function EquationGrid({
           }
           return (
             <div key={`${rowKey}-${colIndex}`} data-row-slot={slotIdForRow} style={style}>
-              <Cell math={displayValue} color={color} align={termAlign} />
+              <Cell math={displayValue} color={color} align={alignFor(colIndex)} />
             </div>
           );
         });
@@ -1158,9 +1180,15 @@ function EquationGrid({
         color: string,
         annotations: ComputedAnnotation[],
         slotIdForRow: string | undefined,
-        marginBottom?: number
+        marginBottom?: number,
+        reserveArcSpace: boolean = false
       ) {
-        if (annotations.length === 0) return renderCells(cells, rowKey, color, slotIdForRow, marginBottom);
+        // A row that will EVER carry distribute arrows keeps their 34px of
+        // headroom from the moment it appears, so the arrows showing up
+        // later never push this row (and everything below it) down.
+        if (annotations.length === 0) {
+          return renderCells(cells, rowKey, color, slotIdForRow, marginBottom, reserveArcSpace ? 34 : 0);
+        }
         // Multiple annotations can be simultaneously active on the same
         // row now (e.g. both a left-side and a right-side distribute
         // diagram, once each has started) - each one still spans its
@@ -1173,7 +1201,7 @@ function EquationGrid({
         // of them do, this row's baseline has already shifted down by
         // 34px, and every other cell in the row (including this one)
         // needs the same shift to stay aligned with it.
-        const anyArcsShown = annotations.some((a) => a.arcsShown > 0);
+        const anyArcsShown = reserveArcSpace || annotations.some((a) => a.arcsShown > 0);
         return cells.map((cellValue, colIndex) => {
           const style = marginBottom !== undefined ? { marginBottom } : undefined;
           if (spanStartCols.has(colIndex)) {
@@ -1213,7 +1241,7 @@ function EquationGrid({
             </div>
           ) : (
             <div key={`${rowKey}-${colIndex}`} data-row-slot={slotIdForRow} style={paddedStyle}>
-              <Cell math={cellValue} color={color} align={termAlign} />
+              <Cell math={cellValue} color={color} align={alignFor(colIndex)} />
             </div>
           );
         });
@@ -1252,8 +1280,8 @@ function EquationGrid({
         }
 
         return [
-          ...renderCellsOrArrow(row.eq1, `${rowIndex}-eq1`, colorFor(row.eq1Highlight), eq1Ann ? [eq1Ann] : [], slotId, -8),
-          ...renderCellsOrArrow(row.eq2, `${rowIndex}-eq2`, colorFor(row.eq2Highlight), eq2Ann ? [eq2Ann] : [], slotId),
+          ...renderCellsOrArrow(row.eq1, `${rowIndex}-eq1`, colorFor(row.eq1Highlight), eq1Ann ? [eq1Ann] : [], slotId, -8, !!arcReserveKeys?.has(`${slotId}|eq1`)),
+          ...renderCellsOrArrow(row.eq2, `${rowIndex}-eq2`, colorFor(row.eq2Highlight), eq2Ann ? [eq2Ann] : [], slotId, undefined, !!arcReserveKeys?.has(`${slotId}|eq2`)),
         ];
       }
 
@@ -1271,7 +1299,7 @@ function EquationGrid({
       // renderCellsOrArrow renders each independently, at its own
       // column span.
       const matchingAnnotations = (distributeAnnotations ?? []).filter((a) => a.targetSlotId === slotId);
-      return renderCellsOrArrow(row.cells, `${rowIndex}`, color, matchingAnnotations, slotId, row.marginBottom);
+      return renderCellsOrArrow(row.cells, `${rowIndex}`, color, matchingAnnotations, slotId, row.marginBottom, !!arcReserveKeys?.has(`${slotId}|`));
     });
   }
 
@@ -1406,6 +1434,350 @@ function EquationGrid({
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Anchored layout (every skill except systems of equations)
+//
+// Each line is laid out on its OWN, compactly - spaced the way the same
+// equation looks when typed into the math editor (TeX spacing) - instead
+// of sharing column widths with every other line (which let a wide later
+// line open big gaps inside earlier ones). Lines still never move:
+//   * Every line's "=" sits at the same spot, fixed from the first step:
+//     the left side grows LEFT from "=", the right side grows RIGHT from
+//     it, and the space reserved on each side is the widest any line in
+//     the problem will ever need (an invisible "probe" copy of each line).
+//   * A line that changes in place (cross-outs, a multiplier appearing,
+//     distribution filling in term by term) is sized for every version
+//     it will ever take, so nothing inside it shifts either.
+//   * Annotation lines (no "=", e.g. "-14 ... -14" written under both
+//     sides) share their column positions with the line right above them,
+//     so each annotation sits directly under the term it cancels.
+// ---------------------------------------------------------------------------
+
+// TeX's own spacing at KaTeX's size for this grid (20px x 1.21 scale):
+// medium space (4mu) around + and -, thick space (5mu) around =.
+const MATH_EM = 20 * 1.21;
+const TEX_MED_SPACE = (MATH_EM * 4) / 18;
+const TEX_THICK_SPACE = (MATH_EM * 5) / 18;
+
+function isBlankCell(c: string | undefined): boolean {
+  if (c === undefined) return true;
+  const t = c.replace(/^(LEFTALIGN:|MARKEDTERM:)+/, "").trim();
+  return t === "" || t === "\\phantom{0}";
+}
+
+// The skills put a fixed 0.5em gap after a leading sign ("+ 14") - here it
+// becomes TeX's medium space, the same gap the editor (and KaTeX) put
+// around a + or - between two terms.
+function texSpacing(c: string): string {
+  return (
+    c
+      // A sign that starts the cell ("+ 14"): KaTeX sees it as a lone
+      // sign, so the gap after it is put in explicitly.
+      .replace(/^((?:[A-Z]+:)*)([+-])\\hspace\{0\.5em\}/, "$1$2\\:")
+      // Anywhere else ("2x + 115" inside one cell) KaTeX already spaces
+      // the + itself - an extra gap would double it.
+      .replace(/\\hspace\{0\.5em\}/g, "")
+  );
+}
+
+// A term after the first on its side that starts with a sign ("-12a" in
+// "11 -12a") is joined to the term before it, so it gets the same gap after
+// the sign as every other term ("11 - 12a") even if the cell didn't spell it
+// out.
+function spaceJoiningSign(c: string): string {
+  return c.replace(/^((?:[A-Z]+:)*)([+-])(?!\\:|\\hspace)/, "$1$2\\:");
+}
+
+function AnchoredEquation({
+  rows,
+  slotIds,
+  slotVersions,
+  slotOrderAll,
+  eqColumnIndex,
+  distributeAnnotations,
+  arcReserveSlots,
+}: {
+  rows: GridRow[];
+  slotIds: string[];
+  slotVersions: Record<string, GridRow[]>;
+  slotOrderAll: string[];
+  eqColumnIndex: number;
+  distributeAnnotations: ComputedAnnotation[];
+  arcReserveSlots: Set<string>;
+}) {
+  const e = eqColumnIndex;
+
+  function colorFor(highlight: GridRow["highlight"]): string {
+    if (highlight === "success" || highlight === "phase-green") return "var(--green)";
+    if (highlight === "phase-blue") return "var(--blue)";
+    if (highlight === "phase-red") return "var(--coral)";
+    return "var(--ink)";
+  }
+
+  // Annotation line = never has an "=" (or other relation) in any version.
+  const isAnnotationSlot = (id: string) =>
+    (slotVersions[id] ?? []).every((r) => r.caption === undefined && (r.cells[e] ?? "") === "");
+
+  // Group = a line plus the annotation lines directly under it; they share
+  // one set of column positions.
+  const groupOf: Record<string, string> = {};
+  const groupSlots: Record<string, string[]> = {};
+  let anchor = slotOrderAll[0];
+  for (const id of slotOrderAll) {
+    if (!isAnnotationSlot(id)) anchor = id;
+    groupOf[id] = anchor;
+    (groupSlots[anchor] ??= []).push(id);
+  }
+
+  // Columns actually used on each side of each group (a column that's
+  // blank in every version takes no space at all).
+  function usedCols(group: string, side: "left" | "right"): number[] {
+    const versions = groupSlots[group].flatMap((id) => slotVersions[id] ?? []).filter((r) => r.caption === undefined);
+    const width = versions[0]?.cells.length ?? 0;
+    const cols: number[] = [];
+    for (let c = 0; c < width; c++) {
+      if (side === "left" ? c >= e : c <= e) continue;
+      if (versions.some((r) => !isBlankCell(r.cells[c]))) cols.push(c);
+    }
+    return cols;
+  }
+
+  function SideBlock({
+    group,
+    side,
+    row,
+    slotId,
+    probeOnly,
+    hidden,
+  }: {
+    group: string;
+    side: "left" | "right";
+    row?: GridRow;
+    slotId?: string;
+    probeOnly?: boolean;
+    hidden?: boolean; // a line not revealed yet - holds its space only
+  }) {
+    const dataSlot = hidden ? undefined : slotId;
+    const cols = usedCols(group, side);
+    const align = side === "left" ? "right" : "left";
+    // Only real equation lines size the columns - an annotation line under
+    // them never widens them (that would open gaps in the line above).
+    const versions = groupSlots[group]
+      .filter((id) => !isAnnotationSlot(id))
+      .flatMap((id) => slotVersions[id] ?? [])
+      .filter((r) => r.caption === undefined);
+    const isAnnotation = !!slotId && isAnnotationSlot(slotId);
+    const color = row ? colorFor(row.highlight) : "var(--ink)";
+    const annotations = row && slotId ? distributeAnnotations.filter((a) => a.targetSlotId === slotId) : [];
+    const reserve = !!slotId && arcReserveSlots.has(slotId);
+    const padTop = reserve || annotations.some((a) => a.arcsShown > 0) ? 34 : 0;
+    const spanStart = new Map<number, ComputedAnnotation>();
+    const absorbed = new Set<number>();
+    for (const a of annotations) {
+      const [c1, c2] = [Math.min(...a.termCols), Math.max(...a.termCols)];
+      if (cols.includes(c1) && cols.includes(c2)) {
+        spanStart.set(c1, a);
+        absorbed.add(c2);
+      }
+    }
+    return (
+      <div
+        style={{
+          display: "inline-grid",
+          gridTemplateColumns: cols.length ? `repeat(${cols.length}, auto)` : "0px",
+          columnGap: TEX_MED_SPACE,
+          alignItems: "center",
+        }}
+      >
+        {versions.flatMap((v, vi) =>
+          cols.map((c, i) => (
+            <div
+              key={`p-${vi}-${c}`}
+              aria-hidden="true"
+              style={{ gridRow: 1, gridColumn: i + 1, height: 0, overflow: "hidden", visibility: "hidden", whiteSpace: "nowrap" }}
+            >
+              <Cell
+                math={c === cols.find((cc) => !isBlankCell(v.cells[cc])) ? texSpacing(v.cells[c] ?? "") : spaceJoiningSign(texSpacing(v.cells[c] ?? ""))}
+                color="var(--ink)"
+                align={align}
+              />
+            </div>
+          ))
+        )}
+        {/* Height reservation: every version this line will ever take
+            (e.g. "8x = -48" later becoming a stacked fraction), invisible
+            and zero-width - so the line is already as tall as it will get,
+            and its "=" never slides down when it changes in place. */}
+        {!probeOnly &&
+          slotId &&
+          (slotVersions[slotId] ?? []).flatMap((v, vi) =>
+            cols.map((c, i) => (
+              <div
+                key={`h-${vi}-${c}`}
+                aria-hidden="true"
+                style={{ gridRow: 1, gridColumn: i + 1, width: 0, overflow: "hidden", visibility: "hidden", paddingTop: padTop || undefined }}
+              >
+                <Cell math={texSpacing(v.cells[c] ?? "")} color="var(--ink)" align={align} />
+              </div>
+            ))
+          )}
+        {!probeOnly &&
+          row &&
+          cols.map((c, i) => {
+            if (absorbed.has(c)) return null;
+            const ann = spanStart.get(c);
+            if (ann) {
+              return (
+                <div
+                  key={c}
+                  data-row-slot={dataSlot}
+                  // Against the "=" (the diagram can be a little narrower
+                  // than the plain cells it replaces).
+                  style={{ gridRow: 1, gridColumn: `${i + 1} / span 2`, justifySelf: side === "left" ? "end" : "start" }}
+                >
+                  <DistributeDiagram
+                    coefficient={ann.coefficient}
+                    term1={texSpacing(ann.term1)}
+                    term2={texSpacing(ann.term2)}
+                    arcsShown={ann.arcsShown}
+                    prefix={ann.prefix && texSpacing(ann.prefix)}
+                    prefixColor={ann.prefixColor}
+                    suffix={ann.suffix && texSpacing(ann.suffix)}
+                    suffixColor={ann.suffixColor}
+                    parenColor={color}
+                    forcePaddingTop={padTop}
+                  />
+                </div>
+              );
+            }
+            if (isAnnotation) {
+              // Lined up with the right edge of the term it sits under, and
+              // allowed to extend past it (zero-width anchor, content
+              // overflowing to the left) - so it never widens the column.
+              return (
+                <div
+                  key={c}
+                  data-row-slot={dataSlot}
+                  style={{
+                    gridRow: 1,
+                    gridColumn: i + 1,
+                    justifySelf: "end",
+                    width: 0,
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    overflow: "visible",
+                    paddingTop: padTop || undefined,
+                  }}
+                >
+                  <Cell math={texSpacing(row.cells[c] ?? "")} color={color} align="right" />
+                </div>
+              );
+            }
+            const firstOnSide = cols.find((cc) => !isBlankCell(row.cells[cc]));
+            const text = texSpacing(row.cells[c] ?? "");
+            return (
+              <div key={c} data-row-slot={dataSlot} style={{ gridRow: 1, gridColumn: i + 1, paddingTop: padTop || undefined }}>
+                <Cell math={c === firstOnSide ? text : spaceJoiningSign(text)} color={color} align={align} />
+              </div>
+            );
+          })}
+      </div>
+    );
+  }
+
+  const groups = Array.from(new Set(slotOrderAll.map((id) => groupOf[id])));
+
+  return (
+    <div style={{ overflowX: "auto", width: "100%", paddingTop: 14, paddingBottom: 4 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "auto auto auto",
+          width: "fit-content",
+          columnGap: TEX_THICK_SPACE,
+          rowGap: 20,
+          alignItems: "center",
+          fontSize: 20,
+        }}
+      >
+        {/* Probe: one invisible copy of each group's two sides, so the
+            space on each side of "=" is the widest it will ever be. */}
+        {groups.map((g) => (
+          <div key={`pl-${g}`} aria-hidden="true" style={{ gridRow: 1, gridColumn: 1, height: 0, overflow: "hidden", visibility: "hidden" }}>
+            <SideBlock group={g} side="left" probeOnly />
+          </div>
+        ))}
+        {groups.map((g) => (
+          <div key={`pr-${g}`} aria-hidden="true" style={{ gridRow: 1, gridColumn: 3, height: 0, overflow: "hidden", visibility: "hidden" }}>
+            <SideBlock group={g} side="right" probeOnly />
+          </div>
+        ))}
+        {/* Every line the problem will ever show is laid out from the
+            first step - the ones not revealed yet are invisible but hold
+            their exact space - so the card is sized for THIS problem
+            (short for one-step, tall for multi-step) and never grows, and
+            each new line appears in a spot that was already there. */}
+        {slotOrderAll.map((slotId, i) => {
+          const hidden = i >= rows.length;
+          const row = hidden ? slotVersions[slotId][0] : rows[i];
+          const gridRow = i + 1;
+          const mb = row.marginBottom;
+          const hide = hidden ? ({ visibility: "hidden" } as const) : undefined;
+          if (row.caption !== undefined) {
+            return (
+              <div
+                key={slotId}
+                data-row-slot={hidden ? undefined : slotId}
+                aria-hidden={hidden || undefined}
+                style={{
+                  ...hide,
+                  gridRow,
+                  gridColumn: "1 / span 3",
+                  // Zero-width and centered, so a caption wider than the
+                  // equation never stretches the layout (which would nudge
+                  // every "=" sideways on the last step).
+                  justifySelf: "center",
+                  width: 0,
+                  display: "flex",
+                  justifyContent: "center",
+                  overflow: "visible",
+                  color: colorFor(row.highlight),
+                  fontWeight: 700,
+                  fontSize: 22,
+                  whiteSpace: "nowrap",
+                  padding: "4px 0",
+                }}
+              >
+                <span>{row.caption}</span>
+              </div>
+            );
+          }
+          const group = groupOf[slotId] ?? slotId;
+          const reserve = arcReserveSlots.has(slotId) || distributeAnnotations.some((a) => a.targetSlotId === slotId && a.arcsShown > 0);
+          const eqSym = row.cells[e] ?? "";
+          return [
+            <div key={`${slotId}-l`} aria-hidden={hidden || undefined} style={{ ...hide, gridRow, gridColumn: 1, justifySelf: "end", marginBottom: mb }}>
+              <SideBlock group={group} side="left" row={row} slotId={slotId} hidden={hidden} />
+            </div>,
+            <div
+              key={`${slotId}-eq`}
+              data-row-slot={hidden ? undefined : slotId}
+              aria-hidden={hidden || undefined}
+              style={{ ...hide, gridRow, gridColumn: 2, textAlign: "center", color: "var(--ink-soft)", whiteSpace: "nowrap", paddingTop: reserve ? 34 : undefined, marginBottom: mb }}
+            >
+              {eqSym ? <InlineMath math={eqSym} /> : null}
+            </div>,
+            <div key={`${slotId}-r`} aria-hidden={hidden || undefined} style={{ ...hide, gridRow, gridColumn: 3, justifySelf: "start", marginBottom: mb }}>
+              <SideBlock group={group} side="right" row={row} slotId={slotId} hidden={hidden} />
+            </div>,
+          ];
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function StepSolver({
   generate,
   skillName,
@@ -1498,12 +1870,33 @@ export default function StepSolver({
 
   const visibleRows: (GridRow | PairedGridRow)[] = slotOrder.map((id) => slotContent[id]);
 
-  // NOTE: the equation-recentering ("spacing") work - a sizing-probe pass
-  // that pre-computed every row a problem would ever show, so grid columns
-  // wouldn't resize (and shift content) as later steps revealed wider
-  // content - is paused for now. EquationGrid below is no longer passed
-  // fullRows/fullSlotIds, so it falls back to sizing columns only from
-  // what's currently revealed, same as before that work started.
+
+  // Systems of equations keep their own layout rules (paired rows, two
+  // tracks) and render exactly as before; every other skill uses the
+  // anchored layout (see AnchoredEquation).
+  const isSystem = isPairedRow(instance.initialRow) || !!instance.trackLayout;
+  const slotVersions: Record<string, GridRow[]> = {};
+  const slotOrderAll: string[] = [];
+  if (!isSystem) {
+    const add = (id: string, row: GridRow | PairedGridRow) => {
+      if (isPairedRow(row)) return;
+      if (!(id in slotVersions)) {
+        slotVersions[id] = [];
+        slotOrderAll.push(id);
+      }
+      slotVersions[id].push(row);
+    };
+    add("__initial__", instance.initialRow);
+    for (const step of instance.steps) for (const u of step.rowUpdates) add(u.slotId, u.row);
+  }
+
+  // Rows that will ever carry distribute arrows keep the arrows' headroom
+  // from the moment they appear, so the arrows never push anything down.
+  const arcReserveKeys = new Set<string>();
+  for (const step of instance.steps) {
+    const dv = step.distributeVisual;
+    if (dv) arcReserveKeys.add(`${dv.targetSlotId ?? "__initial__"}|${dv.equation ?? ""}`);
+  }
 
   let boldActiveSlotId: string | null = null;
   if (instance.boldAfter) {
@@ -1732,12 +2125,9 @@ export default function StepSolver({
         >
           {skillName}
         </div>
+        {isSystem ? (
         <EquationGrid
           rows={visibleRows}
-          // Equation-recentering ("spacing") work is paused for now -
-          // not passing fullRows/fullSlotIds disables the sizing-probe
-          // mechanism below (it returns null without rows), restoring
-          // the original column-sizing behavior while this is revisited.
           boldSlotId={boldActiveSlotId}
           slotIds={slotOrder}
           eqColumnIndex={instance.eqColumnIndex}
@@ -1750,17 +2140,50 @@ export default function StepSolver({
           trackLayout={instance.trackLayout}
           pairedLayout={instance.pairedLayout}
         />
-        {revealed && currentStep && (
+        ) : (
+          <AnchoredEquation
+            rows={visibleRows as GridRow[]}
+            slotIds={slotOrder}
+            slotVersions={slotVersions}
+            slotOrderAll={slotOrderAll}
+            eqColumnIndex={instance.eqColumnIndex}
+            distributeAnnotations={distributeAnnotations}
+            arcReserveSlots={new Set([...arcReserveKeys].filter((k) => k.endsWith("|")).map((k) => k.slice(0, -1)))}
+          />
+        )}
+        {isSystem ? (
+          revealed &&
+          currentStep && (
+            <div
+              style={{
+                marginTop: 6,
+                fontFamily: "var(--font-body)",
+                fontSize: 13,
+                color: "var(--green)",
+                fontWeight: 600,
+              }}
+            >
+              ✓ <MixedText content={currentStep.explanationOnCorrect} />
+            </div>
+          )
+        ) : (
+          // Always holds two lines of room, so the explanation appearing
+          // never makes the card taller.
           <div
             style={{
               marginTop: 6,
+              minHeight: 40,
               fontFamily: "var(--font-body)",
               fontSize: 13,
               color: "var(--green)",
               fontWeight: 600,
             }}
           >
-            ✓ <MixedText content={currentStep.explanationOnCorrect} />
+            {revealed && currentStep && (
+              <>
+                ✓ <MixedText content={currentStep.explanationOnCorrect} />
+              </>
+            )}
           </div>
         )}
       </div>
@@ -1769,21 +2192,80 @@ export default function StepSolver({
       <div
         style={{
           padding: instance.questionPanelPadding ?? "32px 28px",
-          display: "flex",
+          display: isSystem ? "flex" : "grid",
           flexDirection: "column",
           justifyContent: "center",
+          alignItems: isSystem ? undefined : "center",
           gap: 14,
           minHeight: 320,
           minWidth: 0,
         }}
       >
-        {currentStep && (
+        {/* Non-system skills: an invisible copy of EVERY step's question,
+            stacked in the same spot as the real one - so this panel is as
+            tall as the tallest question the problem will ask (number-line
+            choices are much taller than text ones) from the first step,
+            and the card never grows mid-problem. */}
+        {!isSystem &&
+          instance.steps.map((st, si) => (
+            <div
+              key={`qprobe-${si}`}
+              aria-hidden="true"
+              style={{ gridArea: "1 / 1", visibility: "hidden", pointerEvents: "none", display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}
+            >
+              <div style={{ height: 6 }} />
+              <p style={{ margin: 0, fontSize: 16, fontWeight: 700, overflow: "visible", lineHeight: 1.8 }}>
+                <MixedText content={st.prompt} />
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {st.choices.map((choice, ci) => {
+                  const isGraph = choice.text.startsWith(GRAPH_PREFIX);
+                  return (
+                    <div
+                      key={ci}
+                      style={{
+                        boxSizing: "border-box",
+                        padding: isGraph ? "10px 14px" : "16px 14px 10px 14px",
+                        border: "1.5px solid transparent",
+                        fontSize: 14,
+                        lineHeight: 1.6,
+                        whiteSpace: "normal",
+                        overflowX: isGraph ? "visible" : "hidden",
+                      }}
+                    >
+                      {isGraph ? (
+                        <NumberLineGraph {...parseGraphChoice(choice.text)} markerId={`probe-graph-${si}-${ci}`} />
+                      ) : (
+                        <MixedText content={choice.text} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ marginTop: 10, padding: "9px 20px", fontSize: 14, fontWeight: 700, border: "1.5px solid transparent" }}>
+                Next step →
+              </div>
+            </div>
+          ))}
+        {currentStep && !isSystem && (
+          <div style={{ gridArea: "1 / 1", display: "flex", flexDirection: "column", justifyContent: "center", gap: 14, minWidth: 0 }}>
+            {renderQuestion()}
+          </div>
+        )}
+        {currentStep && isSystem && renderQuestion()}
+      </div>
+    </div>
+    </>
+  );
+
+  function renderQuestion() {
+    return (
           <>
             <div
               role="progressbar"
               aria-valuenow={stepIndex + 1}
               aria-valuemin={1}
-              aria-valuemax={instance.steps.length}
+              aria-valuemax={instance!.steps.length}
               style={{
                 width: "100%",
                 height: 6,
@@ -1794,7 +2276,7 @@ export default function StepSolver({
             >
               <div
                 style={{
-                  width: `${(100 * (stepIndex + (revealed ? 1 : 0.15))) / instance.steps.length}%`,
+                  width: `${(100 * (stepIndex + (revealed ? 1 : 0.15))) / instance!.steps.length}%`,
                   height: "100%",
                   borderRadius: 999,
                   background: "var(--blue)",
@@ -1907,9 +2389,6 @@ export default function StepSolver({
               )}
             </div>
           </>
-        )}
-      </div>
-    </div>
-    </>
-  );
+    );
+  }
 }

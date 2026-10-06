@@ -114,9 +114,9 @@ export default function YourProblemPage() {
   const activeExample = example && latex === example.latex ? example : null;
 
   const option = solved ? solved.result.options[Math.min(optionIndex, solved.result.options.length - 1)] : null;
-  // The two-track substitution layout needs the same extra width its own
-  // practice page gives it.
-  const wide = option?.skill.id === "substitution";
+  // Same width as each skill's own practice page: 1300px for everything
+  // except elimination (whose page is still 900px).
+  const wide = !!option && option.skill.id !== "elimination";
 
   return (
     <div style={{ maxWidth: wide ? 1300 : 900, margin: "0 auto", padding: "48px 24px 80px" }}>

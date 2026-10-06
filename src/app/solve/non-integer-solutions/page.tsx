@@ -13,7 +13,7 @@ export default function NonIntegerSolutionsPage() {
   const [modeChoice, setModeChoice] = useState<Mode>("fraction");
 
   return (
-    <div style={{ maxWidth: 900, margin: "0 auto", padding: "48px 24px 80px" }}>
+    <div style={{ maxWidth: 1300, margin: "0 auto", padding: "48px 24px 80px" }}>
       <h1
         style={{
           fontFamily: "var(--font-display)",

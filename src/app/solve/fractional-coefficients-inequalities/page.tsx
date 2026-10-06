@@ -5,7 +5,7 @@ import { generateFractionalCoefficientsInequalityInstance } from "@/lib/skills/f
 
 export default function FractionalCoefficientsInequalitiesPage() {
   return (
-    <div style={{ maxWidth: 900, margin: "0 auto", padding: "48px 24px 80px" }}>
+    <div style={{ maxWidth: 1300, margin: "0 auto", padding: "48px 24px 80px" }}>
       <h1
         style={{
           fontFamily: "var(--font-display)",
