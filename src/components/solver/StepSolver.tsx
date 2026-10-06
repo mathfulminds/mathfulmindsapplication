@@ -1474,7 +1474,7 @@ function texSpacing(c: string): string {
     c
       // A sign that starts the cell ("+ 14"): KaTeX sees it as a lone
       // sign, so the gap after it is put in explicitly.
-      .replace(/^((?:[A-Z]+:)*)([+-])\\hspace\{0\.5em\}/, "$1$2\\:")
+      .replace(/^((?:[A-Z]+:)*\u0003?)([+-])\\hspace\{0\.5em\}/, "$1$2\\:")
       // Anywhere else ("2x + 115" inside one cell) KaTeX already spaces
       // the + itself - an extra gap would double it.
       .replace(/\\hspace\{0\.5em\}/g, "")
@@ -1486,7 +1486,24 @@ function texSpacing(c: string): string {
 // the sign as every other term ("11 - 12a") even if the cell didn't spell it
 // out.
 function spaceJoiningSign(c: string): string {
-  return c.replace(/^((?:[A-Z]+:)*)([+-])(?!\\:|\\hspace)/, "$1$2\\:");
+  return c.replace(/^((?:[A-Z]+:)*\u0003?)([+-])(?!\\:|\\hspace)/, "$1$2\\:");
+}
+
+// "First term never gets a forced sign": the first visible term on each
+// side of a real equation line shows its natural sign - "36", "-9" - never
+// "+ 36" or "- 9", even when the term that used to come before it has
+// since been eliminated. (Annotation lines like "+12" under both sides
+// keep their sign; it's the point of them.)
+// An annotation term stands alone ("-5x" written under both sides), so its
+// sign hugs it - every skill writes them that way, but a few include a gap.
+function tightSign(c: string): string {
+  return c.replace(/^((?:[A-Z]+:)*\u0003?)([+-])(?:\\:|\\hspace\{0\.5em\})/, "$1$2");
+}
+
+function naturalSign(c: string): string {
+  return c
+    .replace(/^((?:[A-Z]+:)*\u0003?)\+(?:\\:|\\hspace\{0\.5em\})?/, "$1")
+    .replace(/^((?:[A-Z]+:)*\u0003?)-(?:\\:|\\hspace\{0\.5em\})/, "$1-");
 }
 
 function AnchoredEquation({
@@ -1598,7 +1615,7 @@ function AnchoredEquation({
               style={{ gridRow: 1, gridColumn: i + 1, height: 0, overflow: "hidden", visibility: "hidden", whiteSpace: "nowrap" }}
             >
               <Cell
-                math={c === cols.find((cc) => !isBlankCell(v.cells[cc])) ? texSpacing(v.cells[c] ?? "") : spaceJoiningSign(texSpacing(v.cells[c] ?? ""))}
+                math={c === cols.find((cc) => !isBlankCell(v.cells[cc])) ? naturalSign(texSpacing(v.cells[c] ?? "")) : spaceJoiningSign(texSpacing(v.cells[c] ?? ""))}
                 color="var(--ink)"
                 align={align}
               />
@@ -1670,7 +1687,7 @@ function AnchoredEquation({
                     paddingTop: padTop || undefined,
                   }}
                 >
-                  <Cell math={texSpacing(row.cells[c] ?? "")} color={color} align="right" />
+                  <Cell math={tightSign(texSpacing(row.cells[c] ?? ""))} color={color} align="right" />
                 </div>
               );
             }
@@ -1678,7 +1695,7 @@ function AnchoredEquation({
             const text = texSpacing(row.cells[c] ?? "");
             return (
               <div key={c} data-row-slot={dataSlot} style={{ gridRow: 1, gridColumn: i + 1, paddingTop: padTop || undefined }}>
-                <Cell math={c === firstOnSide ? text : spaceJoiningSign(text)} color={color} align={align} />
+                <Cell math={c === firstOnSide ? naturalSign(text) : spaceJoiningSign(text)} color={color} align={align} />
               </div>
             );
           })}

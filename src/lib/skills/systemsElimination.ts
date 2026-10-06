@@ -245,6 +245,13 @@ export function buildEliminationSolverInstance(inst: EliminationInstance): Solve
   const initialRow: PairedGridRow = { eq1: eq1Row, eq2: eq2Row };
 
   // --- Step 1: choose which variable to eliminate ---
+  // When x and y take exactly the same amount of work to eliminate, both
+  // answers are correct - marking one of them wrong would tell a student
+  // their perfectly good choice was a mistake. The steps below still
+  // eliminate eliminateVar, and the explanation says so.
+  const xWork = tierAndWork(a1, a2);
+  const yWork = tierAndWork(b1, b2);
+  const variableTie = !isStrictlyEasier(xWork, yWork) && !isStrictlyEasier(yWork, xWork);
   const chooseVariable: SolverStep = {
     stepId: "choose_variable",
     rowUpdates: [],
@@ -252,16 +259,18 @@ export function buildEliminationSolverInstance(inst: EliminationInstance): Solve
     choices: shuffle([
       {
         text: "$x$",
-        isCorrect: eliminateVar === "x",
-        misconceptionTag: eliminateVar === "x" ? null : "chose_harder_variable_to_eliminate",
+        isCorrect: variableTie || eliminateVar === "x",
+        misconceptionTag: variableTie || eliminateVar === "x" ? null : "chose_harder_variable_to_eliminate",
       },
       {
         text: "$y$",
-        isCorrect: eliminateVar === "y",
-        misconceptionTag: eliminateVar === "y" ? null : "chose_harder_variable_to_eliminate",
+        isCorrect: variableTie || eliminateVar === "y",
+        misconceptionTag: variableTie || eliminateVar === "y" ? null : "chose_harder_variable_to_eliminate",
       },
     ]),
-    explanationOnCorrect: `Eliminating ${eliminateVar} takes the least work here.`,
+    explanationOnCorrect: variableTie
+      ? `Both variables take the same amount of work here, so either one works. We'll eliminate ${eliminateVar}.`
+      : `Eliminating ${eliminateVar} takes the least work here.`,
   };
 
   // --- Steps 2-9: scale each equation, one term at a time ---
@@ -602,6 +611,7 @@ export function buildEliminationSolverInstance(inst: EliminationInstance): Solve
   // variable| in that equation, since that's the number being multiplied
   // during substitution. Ties default to Equation 1.
   const substituteIntoEq: 1 | 2 = Math.abs(knownCoefInEq2) < Math.abs(knownCoefInEq1) ? 2 : 1;
+  const equationTie = Math.abs(knownCoefInEq1) === Math.abs(knownCoefInEq2);
 
   const chosenEquationRow: GridRow = {
     cells: substituteIntoEq === 1 ? equationRow(a1, b1, c1) : equationRow(a2, b2, d2),
@@ -684,19 +694,23 @@ export function buildEliminationSolverInstance(inst: EliminationInstance): Solve
       { slotId: "substituted", row: substitutionPendingRow },
     ],
     prompt: `We know $${knownVar} = ${knownValue}$. Which equation is simpler to substitute it into?`,
+    // Same idea as the variable choice: when both equations have the same
+    // size coefficient on the known variable, either one is correct.
     choices: [
       {
-        text: `Equation 1: $${a1}x ${renderMultiplyTerm(b1, "y", true)} = ${c1}$`,
-        isCorrect: substituteIntoEq === 1,
-        misconceptionTag: substituteIntoEq === 1 ? null : "chose_harder_equation_to_substitute_into",
+        text: `Equation 1: $${renderMultiplyTerm(a1, "x")} ${renderMultiplyTerm(b1, "y", true)} = ${c1}$`,
+        isCorrect: equationTie || substituteIntoEq === 1,
+        misconceptionTag: equationTie || substituteIntoEq === 1 ? null : "chose_harder_equation_to_substitute_into",
       },
       {
-        text: `Equation 2: $${a2}x ${renderMultiplyTerm(b2, "y", true)} = ${d2}$`,
-        isCorrect: substituteIntoEq === 2,
-        misconceptionTag: substituteIntoEq === 2 ? null : "chose_harder_equation_to_substitute_into",
+        text: `Equation 2: $${renderMultiplyTerm(a2, "x")} ${renderMultiplyTerm(b2, "y", true)} = ${d2}$`,
+        isCorrect: equationTie || substituteIntoEq === 2,
+        misconceptionTag: equationTie || substituteIntoEq === 2 ? null : "chose_harder_equation_to_substitute_into",
       },
     ],
-    explanationOnCorrect: `The Equation ${substituteIntoEq} has the simpler coefficient to work with.`,
+    explanationOnCorrect: equationTie
+      ? `Both equations have the same size coefficient on $${knownVar}$, so either one works. We'll use Equation ${substituteIntoEq}.`
+      : `The Equation ${substituteIntoEq} has the simpler coefficient to work with.`,
   };
 
   const substituteStep: SolverStep = {

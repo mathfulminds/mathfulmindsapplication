@@ -42,6 +42,8 @@ const DOUBLE_SIGN = /[+-]\s*(\\hspace\{[^}]*\})?\s*[+-]\s*(\\hspace\{[^}]*\})?\s
 // A signed zero term sitting in the grid ("+ 0", "- 0").
 const SIGNED_ZERO_TERM = /(^|[^0-9.])[+-]\s*(\\hspace\{[^}]*\})?\s*0(?![.0-9])(?!\s*\))/;
 
+const TIE_STEPS = new Set(["choose_variable", "choose_substitute_equation"]);
+
 export function validateInstance(instance: SolverInstance, variables: string[]): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   // "1x" / "-1x" - a coefficient of 1 should never be written out.
@@ -96,7 +98,11 @@ export function validateInstance(instance: SolverInstance, variables: string[]):
     const where = `step ${si + 1} (${step.stepId})`;
     if (!step.choices || step.choices.length < 2) issues.push({ where, problem: "fewer than 2 choices" });
     const correct = step.choices.filter((c) => c.isCorrect).length;
-    if (correct !== 1) issues.push({ where, problem: `${correct} correct choices` });
+    // Exactly one right answer - except the Elimination questions where two
+    // options can be genuinely equally good (which variable to eliminate,
+    // which equation to substitute into); there both count as correct.
+    const tieAllowed = TIE_STEPS.has(step.stepId) && correct === 2;
+    if (correct !== 1 && !tieAllowed) issues.push({ where, problem: `${correct} correct choices` });
     const seen = new Set<string>();
     for (const c of step.choices) {
       const key = c.text.replace(/\s+/g, "");

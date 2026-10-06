@@ -611,13 +611,14 @@ function routeSystem(eqs: ParsedEquation[]): SolveOption[] {
     );
   }
 
-  // Elimination - eliminate whichever variable takes less scaling. The
-  // first step asks which variable is easier, so it needs a clear winner.
+  // Elimination - eliminate whichever variable takes less scaling. On a
+  // tie, either is fine (the skill accepts both answers for that
+  // question), so x is used.
   const tx = tierAndWork(a1, a2);
   const ty = tierAndWork(b1, b2);
   const easier = (p: typeof tx, q: typeof tx) => p.tier < q.tier || (p.tier === q.tier && p.work < q.work);
-  const eliminateVar: "x" | "y" | null = easier(tx, ty) ? "x" : easier(ty, tx) ? "y" : null;
-  if (eliminateVar) {
+  const eliminateVar: "x" | "y" = easier(ty, tx) ? "y" : "x";
+  {
     const t = eliminateVar === "x" ? tx : ty;
     const [p, q] = eliminateVar === "x" ? [a1, a2] : [b1, b2];
     const operation = Math.sign(p) === Math.sign(q) ? ("subtract" as const) : ("add" as const);
@@ -626,12 +627,7 @@ function routeSystem(eqs: ParsedEquation[]): SolveOption[] {
     );
   }
 
-  if (options.length === 0 && (unitSpots.length === 1 || eliminateVar)) fail(SAFETY_MESSAGE);
-  if (options.length === 0) {
-    fail(
-      "I can't pick a single best first step for this system yet: substitution needs exactly one variable with a coefficient of 1 or -1, and elimination needs one variable that's clearly easier to eliminate than the other."
-    );
-  }
+  if (options.length === 0) fail(SAFETY_MESSAGE);
   return options;
 }
 
