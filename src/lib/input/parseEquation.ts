@@ -66,6 +66,11 @@ export interface ParsedEquation {
   usesDecimal: boolean;
   usesFraction: boolean;
   latex: string; // clean LaTeX of what was understood, for the preview
+  // Set when the problem is a proportion - one fraction = one fraction of
+  // positive whole numbers, with the variable as one of the four numbers
+  // (which may be a denominator, e.g. 2/3 = 16/x). The variable's spot is
+  // null. left/right/linear are left empty for these.
+  proportion?: { TL: number | null; BL: number | null; TR: number | null; BR: number | null };
 }
 
 export type ParseResult =
@@ -686,6 +691,32 @@ function anyStyle(terms: SurfaceTerm[], pred: (style: NumStyle) => boolean): boo
   });
 }
 
+
+// One fraction = one fraction, each part a positive whole number or the
+// variable, with the variable used exactly once.
+function detectProportion(left: Node, right: Node): { TL: number | null; BL: number | null; TR: number | null; BR: number | null; v: string } | null {
+  const part = (n: Node): { num: number | null; v: string | null } | null => {
+    n = unwrapInvisible(n);
+    if (n.t === "var") return { num: null, v: n.name };
+    if (n.t === "num" && n.style === "int" && n.value.den === 1 && n.value.num > 0) return { num: n.value.num, v: null };
+    return null;
+  };
+  const side = (n: Node) => {
+    n = unwrapInvisible(n);
+    if (n.t !== "div") return null;
+    const top = part(n.num);
+    const bottom = part(n.den);
+    return top && bottom ? { top, bottom } : null;
+  };
+  const L = side(left);
+  const R = side(right);
+  if (!L || !R) return null;
+  const all = [L.top, L.bottom, R.top, R.bottom];
+  const vars = all.filter((p) => p.v !== null);
+  if (vars.length !== 1) return null;
+  return { TL: L.top.num, BL: L.bottom.num, TR: R.top.num, BR: R.bottom.num, v: vars[0].v as string };
+}
+
 export function parseInput(raw: string): ParseResult {
   try {
     const trimmed = raw.trim();
@@ -710,6 +741,22 @@ export function parseInput(raw: string): ParseResult {
       const tokens = tokenize(chunk);
       const parser = new Parser(tokens);
       const { left, relation, right } = parser.parseRelation();
+
+      const prop = chunks.length === 1 && relation === "=" ? detectProportion(left, right) : null;
+      if (prop) {
+        const { v, ...nums } = prop;
+        return {
+          left: [],
+          right: [],
+          relation,
+          variables: [v],
+          linear: { coefs: {}, constant: fromInt(0) },
+          usesDecimal: false,
+          usesFraction: true,
+          latex: `${toLatex(left)} ${REL_LATEX[relation]} ${toLatex(right)}`,
+          proportion: nums,
+        };
+      }
 
       const l = linearize(left);
       const r = linearize(right);

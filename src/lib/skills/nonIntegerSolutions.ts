@@ -301,7 +301,7 @@ export function buildNonIntegerSolverInstance(
       { slotId: "__initial__", row: initialRowMarked },
       { slotId: "cancel_annotation", row: cancelRowMarked },
     ],
-    prompt: `What is ${bAbsPrompt} ${bIsPositive ? "-" : "+"} ${bAbsPrompt}?`,
+    prompt: `What is ${bIsPositive ? "" : "-"}${bAbsPrompt} ${bIsPositive ? "-" : "+"} ${bAbsPrompt}?`,
     choices: shuffle([
       { text: "$0$", isCorrect: true, misconceptionTag: null },
       {

@@ -141,7 +141,7 @@ export function buildSolverInstance(
       { slotId: "cancel_var_annotation", row: cancelVarRowMarked },
       { slotId: "reduced_equation", row: reducedRow },
     ],
-    prompt: `What is ${absA}${x} ${opSym} ${absA}${x}?`,
+    prompt: `What is ${opSym === "+" ? "-" : ""}${absA}${x} ${opSym} ${absA}${x}?`,
     choices: shuffle([
       { text: "0", isCorrect: true, misconceptionTag: null },
       { text: cancelDistractors[0].text, isCorrect: false, misconceptionTag: cancelDistractors[0].tag },

@@ -18,8 +18,11 @@ const groups: SkillGroup[] = [
     color: 'var(--blue)',
     skills: [
       { title: 'One-Step Equations', description: 'Undo a single operation to isolate the variable.', href: '/solve/one-step-equations' },
+      { title: 'One-Step Equations with Fractions & Decimals', description: 'Undo a single operation when the numbers are fractions or decimals.', href: '/solve/one-step-fractions-decimals' },
       { title: 'Two-Step Equations', description: 'Undo two operations, one at a time.', href: '/solve/two-step-equations' },
+      { title: 'Proportions', description: 'Cross multiply to find the missing number in two equal ratios.', href: '/solve/proportions' },
       { title: 'Equations with Parentheses', description: 'Distribute first, then solve.', href: '/solve/parentheses-equations' },
+      { title: 'Distributing a Negative', description: 'Distribute a minus sign in front of parentheses, then solve.', href: '/solve/distributing-a-negative' },
       { title: 'Fractional Coefficients', description: 'Solve equations where the variable has a fractional coefficient.', href: '/solve/fractional-coefficients' },
       { title: 'Non-Integer Solutions', description: 'Practice equations whose answers aren\u2019t whole numbers.', href: '/solve/non-integer-solutions' },
       { title: 'Combining Like Terms', description: 'Combine like terms on one side before isolating the variable.', href: '/solve/combining-like-terms' },

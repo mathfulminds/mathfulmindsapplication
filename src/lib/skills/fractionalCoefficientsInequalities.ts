@@ -174,7 +174,7 @@ export function buildFractionSolverInstance(
   const cancelConstant: SolverStep = {
     stepId: "cancel_constant",
     rowUpdates: [],
-    prompt: `What is ${absB} ${constOpSym} ${absB}?`,
+    prompt: `What is ${constantIsPositive ? absB : -absB} ${constOpSym} ${absB}?`,
     choices: shuffle([
       { text: "0", isCorrect: true, misconceptionTag: null },
       { text: cancelConstDistractors[0].text, isCorrect: false, misconceptionTag: cancelConstDistractors[0].tag },

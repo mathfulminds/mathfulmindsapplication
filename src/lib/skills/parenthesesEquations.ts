@@ -62,6 +62,21 @@ export function generateParenEquation(): ParenInstance {
   };
 }
 
+
+// The correct answer plus two different wrong ones (some wrong answers
+// coincide for small numbers, e.g. a multiplier of -1).
+function uniqueChoices(correct: string, wrong: { text: string; tag: string }[]): Choice[] {
+  const seen = new Set([correct]);
+  const out: Choice[] = [{ text: correct, isCorrect: true, misconceptionTag: null }];
+  for (const w of wrong) {
+    if (out.length === 3) break;
+    if (seen.has(w.text)) continue;
+    seen.add(w.text);
+    out.push({ text: w.text, isCorrect: false, misconceptionTag: w.tag });
+  }
+  return out;
+}
+
 export function buildParenSolverInstance(
   eq: ParenInstance,
   variableSymbol: string = "x"
@@ -70,7 +85,11 @@ export function buildParenSolverInstance(
 
   const nxNatural = renderMultiplyTerm(n, variableSymbol);
   const pSigned = renderConstant(p, true);
-  const term1ColOriginal = `${m}(${nxNatural}`;
+  // A lone minus sign in front of the parentheses, -(nx + p), is a
+  // multiplier of -1 (used by the distributing-a-negative skill).
+  const coefDisplay = m === -1 ? "-" : `${m}`;
+  const minusOneNote = m === -1 ? "A minus sign in front of parentheses means multiply by -1. " : "";
+  const term1ColOriginal = `${coefDisplay}(${nxNatural}`;
   const term2ColOriginal = `${pSigned})`;
 
   const initialRow: GridRow = {
@@ -113,35 +132,39 @@ export function buildParenSolverInstance(
     cells: assembleRow(mnxNatural, BLANK, BLANK, orientation, ""),
   };
 
-  const step1Choices: Choice[] = shuffle([
-    { text: `$${mnxNatural}$`, isCorrect: true, misconceptionTag: null },
-    { text: `$${renderMultiplyTerm(-mn, variableSymbol)}$`, isCorrect: false, misconceptionTag: "sign_error" },
-    { text: `$${nxNatural}$`, isCorrect: false, misconceptionTag: "forgot_outside_coefficient" },
-  ]);
+  const step1Choices: Choice[] = shuffle(
+    uniqueChoices(`$${mnxNatural}$`, [
+      { text: `$${renderMultiplyTerm(-mn, variableSymbol)}$`, tag: "sign_error" },
+      { text: `$${nxNatural}$`, tag: "forgot_outside_coefficient" },
+      { text: `$${renderMultiplyTerm(mn * 2, variableSymbol)}$`, tag: "arithmetic_slip" },
+    ])
+  );
 
   const distributeFirstTerm: SolverStep = {
     stepId: "distribute_first_term",
     rowUpdates: [{ slotId: "distributed", row: rowAfterFirstTerm }],
-    prompt: `What is $${m} \\times ${nxNatural}$?`,
+    prompt: `${minusOneNote}What is $${m} \\times ${nxNatural}$?`,
     choices: step1Choices,
     explanationOnCorrect: `$${m} \\times ${nxNatural} = ${mnxNatural}$.`,
-    distributeVisual: { coefficient: `${m}`, term1: nxNatural, term2: pSigned },
+    distributeVisual: { coefficient: coefDisplay, term1: nxNatural, term2: pSigned },
   };
 
   // --- Sub-step 2: distribute into the second (constant) term ---
-  const step2Choices: Choice[] = shuffle([
-    { text: `$${mpSigned}$`, isCorrect: true, misconceptionTag: null },
-    { text: `$${renderConstant(-mp, true)}$`, isCorrect: false, misconceptionTag: "sign_error" },
-    { text: `$${pSigned}$`, isCorrect: false, misconceptionTag: "forgot_to_distribute_second_term" },
-  ]);
+  const step2Choices: Choice[] = shuffle(
+    uniqueChoices(`$${mpSigned}$`, [
+      { text: `$${renderConstant(-mp, true)}$`, tag: "sign_error" },
+      { text: `$${pSigned}$`, tag: "forgot_to_distribute_second_term" },
+      { text: `$${renderConstant(mp - 1, true)}$`, tag: "arithmetic_slip" },
+    ])
+  );
 
   const distributeSecondTerm: SolverStep = {
     stepId: "distribute_second_term",
     rowUpdates: [{ slotId: "distributed", row: twoStep.initialRow }],
     prompt: `What is $${m} \\times ${p}$?`,
     choices: step2Choices,
-    explanationOnCorrect: `$${m} \\times ${p} = ${mp}$.`,
-    distributeVisual: { coefficient: `${m}`, term1: nxNatural, term2: pSigned },
+    explanationOnCorrect: `$${m} \\times ${p} = ${mp}$.${m === -1 ? " The rest of the equation gets brought down unchanged." : ""}`,
+    distributeVisual: { coefficient: coefDisplay, term1: nxNatural, term2: pSigned },
   };
 
   return {

@@ -21,6 +21,9 @@ import { generateVariablesBothSidesInstance } from "@/lib/skills/variablesBothSi
 import { generateVariablesBothSidesInfiniteOrNoSolutionsInstance } from "@/lib/skills/variablesBothSidesInfiniteOrNoSolutions";
 import { generateMultiStepEquationsNoParenthesesInstance } from "@/lib/skills/multiStepEquationsNoParentheses";
 import { generateMultiStepEquationsWithParenthesesInstance } from "@/lib/skills/multiStepEquationsWithParentheses";
+import { generateProportionInstance } from "@/lib/skills/proportions";
+import { generateDistributeNegativeInstance } from "@/lib/skills/distributeNegative";
+import { generateOneStepRationalInstance } from "@/lib/skills/oneStepRational";
 import { generateEliminationInstance } from "@/lib/skills/systemsElimination";
 import { generateSubstitutionInstanceTwoTrack } from "@/lib/skills/systemsSubstitutionHorizontal";
 
@@ -43,8 +46,15 @@ export const SKILL_GROUPS: SkillExampleGroup[] = [
     color: "var(--blue)",
     skills: [
       { title: "One-Step Equations", skill: SKILLS.oneStepEq, generate: generateOneStepInstance },
+      {
+        title: "One-Step Equations with Fractions & Decimals",
+        skill: SKILLS.oneStepRational,
+        generate: () => generateOneStepRationalInstance(Math.random() < 0.5 ? "fraction" : "decimal"),
+      },
       { title: "Two-Step Equations", skill: SKILLS.twoStepEq, generate: generateTwoStepInstance },
+      { title: "Proportions", skill: SKILLS.proportion, generate: generateProportionInstance },
       { title: "Equations with Parentheses", skill: SKILLS.parenEq, generate: generateParenthesesEquationInstance },
+      { title: "Distributing a Negative", skill: SKILLS.distNeg, generate: generateDistributeNegativeInstance },
       { title: "Fractional Coefficients", skill: SKILLS.fracEq, generate: generateFractionInstance },
       { title: "Non-Integer Solutions", skill: SKILLS.nonIntEq, generate: () => generateNonIntegerInstance("fraction") },
       { title: "Combining Like Terms", skill: SKILLS.combineLike, generate: generateCombiningLikeTermsInstance },

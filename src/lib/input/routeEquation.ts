@@ -30,6 +30,10 @@ import { buildSolverInstance as buildBothSidesSpecial } from "@/lib/skills/varia
 import { buildSolverInstance as buildMultiNoParen } from "@/lib/skills/multiStepEquationsNoParentheses";
 import { buildSolverInstance as buildMultiWithParen } from "@/lib/skills/multiStepEquationsWithParentheses";
 import type { SideSpec } from "@/lib/skills/multiStepEquationsCore";
+import { buildProportionInstance } from "@/lib/skills/proportions";
+import { buildDistributeNegativeInstance } from "@/lib/skills/distributeNegative";
+import { buildOneStepRationalInstance } from "@/lib/skills/oneStepRational";
+import type { RationalMode } from "@/lib/skills/oneStepRational";
 import { buildEliminationSolverInstance } from "@/lib/skills/systemsElimination";
 import { buildSubstitutionInstanceTwoTrack } from "@/lib/skills/systemsSubstitutionHorizontal";
 import { parseInput } from "./parseEquation";
@@ -64,6 +68,9 @@ export const SKILLS = {
   fracIneq: { id: "fracIneq", name: "Fractional coefficients (inequalities)", href: "/solve/fractional-coefficients-inequalities" },
   nonIntEq: { id: "nonIntEq", name: "Fraction / decimal solutions", href: "/solve/non-integer-solutions" },
   nonIntIneq: { id: "nonIntIneq", name: "Fraction / decimal solutions (inequalities)", href: "/solve/non-integer-inequalities" },
+  oneStepRational: { id: "oneStepRational", name: "One-step equations with fractions & decimals", href: "/solve/one-step-fractions-decimals" },
+  distNeg: { id: "distNeg", name: "Distributing a negative", href: "/solve/distributing-a-negative" },
+  proportion: { id: "proportion", name: "Proportions", href: "/solve/proportions" },
   parenEq: { id: "parenEq", name: "Equations with parentheses", href: "/solve/parentheses-equations" },
   parenIneq: { id: "parenIneq", name: "Inequalities with parentheses", href: "/solve/parentheses-inequalities" },
   combineLike: { id: "combineLike", name: "Combining like terms", href: "/solve/combining-like-terms" },
@@ -177,6 +184,39 @@ function checkNoZeroTerms(eq: ParsedEquation) {
 const ZERO_ANSWER =
   "Problems whose answer is 0 aren't supported yet. The steps check your work partly by the answer's sign, and 0 doesn't have one. Try a problem with a nonzero answer.";
 
+
+// One-step equations with fraction or decimal numbers (equations only).
+// Decimal mode needs every number - the answer included - to be an exact
+// decimal; fraction mode can't have decimals in it.
+function rationalMode(eq: ParsedEquation, values: Fraction[]): RationalMode {
+  // (eq.usesDecimal also counts a fraction coefficient, so look directly.)
+  const terms = [...eq.left, ...eq.right];
+  const hasDecimal = terms.some((t) => (t.kind === "const" && t.style === "decimal") || (t.kind === "var" && t.coefStyle === "decimal"));
+  const hasFraction = terms.some((t) => (t.kind === "const" && t.style === "fraction") || (t.kind === "var" && (t.form === "fraction" || t.coefStyle === "fraction")));
+  if (hasDecimal && hasFraction) fail("Mixing decimals with fractions isn't supported yet.");
+  if (hasDecimal) {
+    if (!values.every(decimalOK)) fail("The answer to this one is a repeating decimal, which isn't supported yet. Try it with fractions instead.");
+    return "decimal";
+  }
+  return "fraction";
+}
+function rationalOneStep(
+  eq: ParsedEquation,
+  kind: "add" | "mul" | "div",
+  k: Fraction,
+  c: Fraction,
+  solution: Fraction,
+  variableFirst: boolean,
+  orientation: Orientation,
+  v: string
+): Built {
+  const mode = rationalMode(eq, [k, c, solution]);
+  return {
+    skill: SKILLS.oneStepRational,
+    instance: buildOneStepRationalInstance({ mode, kind, k, rhs: c, variableFirst, orientation }, v),
+  };
+}
+
 function routeSingle(eq: ParsedEquation): Built {
   checkNoZeroTerms(eq);
   const v = eq.variables[0];
@@ -228,6 +268,9 @@ function routeSingle(eq: ParsedEquation): Built {
         fail(`A negative sign in front of a division like -${v}/4 isn't supported yet. You can type it as ${v}/(-4) instead, which means the same thing.`);
       }
       if (!isInt(c) || C[0].kind !== "const" || (C[0] as ConstTerm).style !== "int") {
+        if (!isIneq && term.divisor! > 0 && (C[0] as ConstTerm).style === "decimal") {
+          return rationalOneStep(eq, "div", makeFraction(term.divisor!, 1), c, solution, true, orientation, v);
+        }
         fail("Division problems with a fraction or decimal on the other side aren't supported yet.");
       }
       const a = term.divisor!;
@@ -246,6 +289,7 @@ function routeSingle(eq: ParsedEquation): Built {
           ? { skill: SKILLS.oneStepIneq, instance: buildOneStepIneq({ ...inst, boundary: val(solution), origSymbol: symbol! }, v) }
           : { skill: SKILLS.oneStepEq, instance: buildOneStepEq({ ...inst, solution: val(solution) }, v) };
       }
+      if (!isIneq) return rationalOneStep(eq, "mul", a, c, solution, true, orientation, v);
       fail(
         isInt(solution)
           ? "Decimal coefficients are only supported when they end in .5 (like 2.5x) right now."
@@ -253,7 +297,8 @@ function routeSingle(eq: ParsedEquation): Built {
       );
     }
 
-    fail("A one-step problem with a fraction coefficient (like (2/3)x = 4) isn't supported yet. Fraction coefficients work for two-step problems, like (2/3)x + 1 = 5.");
+    if (term.form === "fraction" && !isIneq) return rationalOneStep(eq, "mul", term.coef, c, solution, true, orientation, v);
+    fail("A one-step inequality with a fraction coefficient (like (2/3)x < 4) isn't supported yet. Fraction coefficients work for two-step inequalities, like (2/3)x + 1 < 5.");
   }
 
   // ----- variable term + constant: x + b, ax + b, x/a + b, (n/d)x + b -----
@@ -266,7 +311,10 @@ function routeSingle(eq: ParsedEquation): Built {
 
     // x + b = c  ->  one-step (addition/subtraction)
     if (term.form === "multiply" && val(term.coef) === 1) {
-      if (!allInt) fail("One-step addition and subtraction problems with fractions or decimals aren't supported yet.");
+      if (!allInt) {
+        if (isIneq) fail("One-step addition and subtraction inequalities with fractions or decimals aren't supported yet.");
+        return rationalOneStep(eq, "add", b, c, solution, variableFirst, orientation, v);
+      }
       const inst = { variant: "additive" as const, a: 1, b: val(b), form: "multiply" as const, variableFirst, orientation, rhs: val(c) };
       return isIneq
         ? { skill: SKILLS.oneStepIneq, instance: buildOneStepIneq({ ...inst, boundary: val(solution), origSymbol: symbol! }, v) }
@@ -320,6 +368,34 @@ function routeSingle(eq: ParsedEquation): Built {
 
   // ----- several terms on the variable side -----
   if (isIneq) fail(NOT_YET_INEQUALITY);
+  // k - m(nx + p) = q: subtracting a group (distributing a negative).
+  if (E.length === 2 && isConst(E[0]) && isParen(E[1])) {
+    const pt = E[1] as ParenTerm;
+    const [nTerm, pTerm] = pt.inner;
+    const ok =
+      isPlainInt(E[0]) &&
+      isInt(pt.m) &&
+      pt.mStyle === "int" &&
+      val(pt.m) < 0 &&
+      pt.inner.length === 2 &&
+      isVar(nTerm) &&
+      isConst(pTerm) &&
+      isPlainInt(nTerm) &&
+      isPlainInt(pTerm) &&
+      isInt(c);
+    if (ok) {
+      const k = val((E[0] as ConstTerm).value);
+      const m = -val(pt.m);
+      const n = val((nTerm as VarTerm).coef);
+      const p = val((pTerm as ConstTerm).value);
+      if (k - m * p === 0) fail("After distributing, the numbers on that side add up to 0, which isn't supported yet.");
+      if (!isInt(solution)) fail(INTEGER_ANSWER_ONLY);
+      return {
+        skill: SKILLS.distNeg,
+        instance: buildDistributeNegativeInstance({ kind: "subtractGroup", k, m, n, p, q: val(c), orientation }, v),
+      };
+    }
+  }
   if (E.some(isParen)) fail("Parentheses combined with other terms on one side are only supported when the variable is on both sides, like 2(x + 3) = 4x - 2.");
 
   // a1x + a2x + b = c (exactly this order) -> combining like terms
@@ -352,6 +428,24 @@ function routeParen(
   v: string
 ): Built {
   const [nTerm, pTerm] = t.inner;
+  // -(nx + p) = q: a lone minus sign is a multiplier of -1.
+  if (
+    !symbol &&
+    val(t.m) === -1 &&
+    t.inner.length === 2 &&
+    isVar(nTerm) &&
+    isConst(pTerm) &&
+    isPlainInt(nTerm) &&
+    isPlainInt(pTerm) &&
+    isInt(c) &&
+    isInt(solution)
+  ) {
+    const n = val((nTerm as VarTerm).coef);
+    return {
+      skill: SKILLS.distNeg,
+      instance: buildDistributeNegativeInstance({ kind: "minusOne", n, p: val((pTerm as ConstTerm).value), q: val(c), orientation }, v),
+    };
+  }
   const shapeOK =
     t.inner.length === 2 &&
     isVar(nTerm) &&
@@ -656,7 +750,9 @@ export function routeInput(raw: string): RouteResult {
       if (eq.variables.length > 1) {
         fail(`This has ${eq.variables.length} different variables (${eq.variables.join(", ")}). For a system, type two equations separated by a comma or a new line.`);
       }
-      const built = routeSingle(eq);
+      const built: Built = eq.proportion
+        ? { skill: SKILLS.proportion, instance: buildProportionInstance(eq.proportion, eq.variables[0]) }
+        : routeSingle(eq);
       options = [{ id: built.skill.id, label: built.skill.name, ...built }];
       variables = eq.variables;
     }

@@ -184,7 +184,7 @@ export function buildOneStepInstance(
         { slotId: "__initial__", row: initialRowMarked },
         { slotId: "cancel_annotation", row: cancelRowMarked },
       ],
-      prompt: `What is ${absB} ${cancelOpSym} ${absB}?`,
+      prompt: `What is ${constantIsPositive ? absB : -absB} ${cancelOpSym} ${absB}?`,
       choices: shuffle([
         { text: "0", isCorrect: true, misconceptionTag: null },
         { text: cancelConstDistractors[0].text, isCorrect: false, misconceptionTag: cancelConstDistractors[0].tag },

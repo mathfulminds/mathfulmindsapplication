@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { InlineMath } from "react-katex";
+import { InlineMath as KatexInlineMath } from "react-katex";
 import "katex/dist/katex.min.css";
 import type { DistributeVisual, GridRow, PairedGridRow, SolverInstance, SolverStep } from "@/lib/skills/types";
 import Celebration from "@/components/solver/Celebration";
@@ -52,7 +52,7 @@ function GraphLabel({ text, x, y }: { text: string; x: number; y: number }) {
       <>
         {negative && (
           <text x={x - barHalfWidth - 8} y={y + 5} textAnchor="middle" fontSize={13} fill="var(--ink-soft)">
-            -
+            {"\u2212"}
           </text>
         )}
         <text x={x} y={y - 2} textAnchor="middle" fontSize={11} fill="var(--ink-soft)">
@@ -78,11 +78,11 @@ function GraphLabel({ text, x, y }: { text: string; x: number; y: number }) {
   if (olStart === -1 || olEnd === -1) {
     return (
       <text x={x} y={y} textAnchor="middle" fontSize={12} fill="var(--ink-soft)">
-        {text}
+        {text.replace(/-/g, "\u2212")}
       </text>
     );
   }
-  const before = text.slice(0, olStart);
+  const before = text.slice(0, olStart).replace(/-/g, "\u2212");
   const overlined = text.slice(olStart + 1, olEnd);
   const after = text.slice(olEnd + 1);
   const fullText = before + overlined + after;
@@ -114,46 +114,123 @@ function GraphLabel({ text, x, y }: { text: string; x: number; y: number }) {
   );
 }
 
+// The numeric value behind a graph label, so the point can sit at the
+// right spot between the tick marks. Handles whole numbers, stacked
+// fractions ("FRACLABEL:-7/2") and decimals with a repeating part (the
+// repeating digits are expanded a few times - plenty for placement).
+function graphLabelValue(text: string): number {
+  if (text.startsWith(FRACLABEL_PREFIX)) {
+    const raw = text.slice(FRACLABEL_PREFIX.length);
+    const negative = raw.startsWith("-");
+    const [num, den] = (negative ? raw.slice(1) : raw).split("/").map(Number);
+    return (negative ? -1 : 1) * (num / den);
+  }
+  const olStart = text.indexOf(OVERLINE_START);
+  const olEnd = text.indexOf(OVERLINE_END);
+  let plain = text;
+  if (olStart !== -1 && olEnd !== -1) {
+    const rep = text.slice(olStart + 1, olEnd);
+    plain = text.slice(0, olStart) + rep.repeat(6) + text.slice(olEnd + 1);
+  }
+  return parseFloat(plain.replace(/\u2212/g, "-"));
+}
+
+// Whole numbers written with a real minus sign, as in a textbook.
+function tickLabel(n: number): string {
+  return n < 0 ? `\u2212${Math.abs(n)}` : String(n);
+}
+
+// A textbook-style number line: arrows on both ends, a tick at every whole
+// number around the answer, labels under the ticks, an open or closed
+// circle at the boundary, and the solution shaded as a thick ray. A whole-
+// number boundary is shown by darkening its own tick label; a fraction or
+// decimal boundary sits between ticks with its label above the point.
 function NumberLineGraph({
   boundary,
   direction,
   inclusive,
   markerId,
+  color = "var(--ink)",
+  align = "center",
 }: {
   boundary: string;
   direction: "left" | "right";
   inclusive: boolean;
   markerId: string;
+  color?: string;
+  align?: "center" | "left";
 }) {
-  const centerX = 80;
-  const y = 24;
-  const edgeX = direction === "right" ? 146 : 14;
+  const value = graphLabelValue(boundary);
+  const isWhole = Number.isInteger(value);
+  const lo = isWhole ? value - 4 : Math.floor(value) - 3;
+  const hi = isWhole ? value + 4 : Math.ceil(value) + 3;
+  const W = 320;
+  const axisL = 8;
+  const axisR = W - 8;
+  const tickL = 34;
+  const tickR = W - 34;
+  const y = isWhole ? 16 : 46;
+  const H = y + 32;
+  const xOf = (v: number) => tickL + ((v - lo) / (hi - lo)) * (tickR - tickL);
+  const px = xOf(value);
+  const ticks: number[] = [];
+  for (let n = lo; n <= hi; n++) ticks.push(n);
+  const rayEnd = direction === "right" ? axisR : axisL;
   return (
-    <svg viewBox="0 0 160 72" style={{ width: "100%", maxWidth: 200, display: "block" }}>
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ width: "100%", maxWidth: W, display: "block", margin: align === "center" ? "0 auto" : 0, overflow: "visible" }}
+      role="img"
+      aria-label={`Number line: ${inclusive ? "closed" : "open"} circle at ${boundary.replace(/^FRACLABEL:/, "")}, shaded to the ${direction}`}
+    >
       <defs>
-        <marker id={markerId} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
-          <path d="M0,0 L8,4 L0,8 Z" fill="currentColor" />
+        <marker id={`${markerId}-ax`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse">
+          <path d="M0,0.5 L8,4 L0,7.5 Z" fill="var(--ink-soft)" />
+        </marker>
+        <marker id={`${markerId}-ray`} markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L5,2.5 L0,5 Z" fill={color} />
         </marker>
       </defs>
-      <line x1={8} y1={y} x2={152} y2={y} stroke="var(--line)" strokeWidth={1.5} />
       <line
-        x1={centerX}
+        x1={axisL + 6}
         y1={y}
-        x2={edgeX}
+        x2={axisR - 6}
         y2={y}
-        stroke="currentColor"
-        strokeWidth={3}
-        markerEnd={`url(#${markerId})`}
+        stroke="var(--ink-soft)"
+        strokeWidth={1.5}
+        markerStart={`url(#${markerId}-ax)`}
+        markerEnd={`url(#${markerId}-ax)`}
       />
-      <circle
-        cx={centerX}
-        cy={y}
-        r={6}
-        fill={inclusive ? "currentColor" : "#fff"}
-        stroke="currentColor"
-        strokeWidth={2.5}
+      {ticks.map((n) => {
+        const tx = xOf(n);
+        const isAnswer = isWhole && n === value;
+        return (
+          <g key={n}>
+            <line x1={tx} y1={y - 6} x2={tx} y2={y + 6} stroke="var(--ink-soft)" strokeWidth={1.25} />
+            <text
+              x={tx}
+              y={y + 24}
+              textAnchor="middle"
+              fontSize={isAnswer ? 13 : 12}
+              fontWeight={isAnswer ? 700 : 400}
+              fill={isAnswer ? color : "var(--ink-soft)"}
+            >
+              {tickLabel(n)}
+            </text>
+          </g>
+        );
+      })}
+      <line
+        x1={px}
+        y1={y}
+        x2={direction === "right" ? rayEnd - 10 : rayEnd + 10}
+        y2={y}
+        stroke={color}
+        strokeWidth={4}
+        markerEnd={`url(#${markerId}-ray)`}
       />
-      <GraphLabel text={boundary} x={centerX} y={y + 20} />
+      <circle cx={px} cy={y} r={6.5} fill={inclusive ? color : "var(--card)"} stroke={color} strokeWidth={2.5} />
+      {!isWhole && <GraphLabel text={boundary} x={px} y={boundary.startsWith(FRACLABEL_PREFIX) ? y - 30 : y - 14} />}
     </svg>
   );
 }
@@ -426,7 +503,7 @@ function renderMarkedFraction(content: string, color: string): ReactNode {
         verticalAlign: "middle",
       }}
     >
-      <span style={{ display: "inline-flex", alignItems: "baseline", paddingBottom: "0.15em" }}>
+      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: "1.2em", paddingBottom: "0.1em", lineHeight: 1.15 }}>
         <XMark size="large">
           <InlineMath math={coefficient} />
         </XMark>
@@ -442,7 +519,7 @@ function renderMarkedFraction(content: string, color: string): ReactNode {
           alignSelf: "stretch",
         }}
       />
-      <span style={{ paddingTop: "0.15em" }}>
+      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: "1.2em", paddingTop: "0.1em", lineHeight: 1.15 }}>
         <XMark size="large">
           <InlineMath math={denominator} />
         </XMark>
@@ -569,6 +646,132 @@ function renderStackedFraction(content: string, color: string): ReactNode {
 // be wider than whatever single width was phantom-matched).
 const LEFTALIGN_PREFIX = "LEFTALIGN:";
 
+
+// Multiplying a fraction coefficient by its reciprocal, with every number
+// crossed out once they're confirmed to cancel to 1:
+// "(5/4)(4/5)x" -> both 5s and both 4s crossed, the x left alone.
+// Format: "MARKEDRECIP:{L|R}\u0006{recipNum}\u0006{recipDen}\u0006{coefNum}\u0006{coefDen}\u0006{variable}"
+// (L = reciprocal written first, R = reciprocal written after the term).
+const MARKEDRECIP_PREFIX = "MARKEDRECIP:";
+
+function crossedFraction(num: string, den: string, color: string): ReactNode {
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", verticalAlign: "middle", margin: "0 2px" }}>
+      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: "1.2em", padding: "0 0.2em 0.1em", lineHeight: 1.15 }}>
+        <XMark size="large">
+          <InlineMath math={num} />
+        </XMark>
+      </span>
+      <span style={{ borderTop: `0.06em solid ${color}`, alignSelf: "stretch" }} />
+      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: "1.2em", padding: "0.1em 0.2em 0", lineHeight: 1.15 }}>
+        <XMark size="large">
+          <InlineMath math={den} />
+        </XMark>
+      </span>
+    </span>
+  );
+}
+
+function renderMarkedReciprocal(content: string, color: string): ReactNode {
+  const [side, rn, rd, cn, cd, v] = content.split(COEF_VAR_SEPARATOR);
+  const recip = (
+    <>
+      (
+      {crossedFraction(rn, rd, color)}
+      )
+    </>
+  );
+  const term = (
+    <>
+      {crossedFraction(cn, cd, color)}
+      <InlineMath math={v} />
+    </>
+  );
+  return (
+    <span style={{ color, display: "inline-flex", alignItems: "center" }}>
+      {side === "L" ? (
+        <>
+          {recip}
+          {term}
+        </>
+      ) : (
+        <>
+          {term}
+          {recip}
+        </>
+      )}
+    </span>
+  );
+}
+
+
+// A line that will be divided in place, drawn as a stack from the start:
+// "3x" is a stack of 3x over an invisible bar and denominator, the "=" is
+// a stack of "=" over nothing, and "3x/3" is the same stack with the bar
+// and denominator showing. Every version has the same shape, so when the
+// bars and denominators appear, the numbers and "=" stay exactly where
+// they were. Same geometry as renderMarkedFraction (the crossed-out
+// version that follows).
+// Format: "STACKTOP:{0|1 bar shown}\u0005{numerator}\u0005{denominator}".
+const STACKTOP_PREFIX = "STACKTOP:";
+
+function renderStackTop(content: string, color: string): ReactNode {
+  const [bar, num, den] = content.split(STACK_SEPARATOR);
+  const shown = bar === "1";
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", verticalAlign: "middle" }}>
+      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: "1.2em", paddingBottom: "0.1em", lineHeight: 1.15 }}>
+        <InlineMath math={num} />
+      </span>
+      <span style={{ borderTop: `0.06em solid ${color}`, alignSelf: "stretch", visibility: shown ? "visible" : "hidden" }} />
+      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: "1.2em", paddingTop: "0.1em", lineHeight: 1.15, visibility: shown ? "visible" : "hidden" }}>
+        <InlineMath math={den} />
+      </span>
+    </span>
+  );
+}
+
+
+// Every \dfrac gets a digit-height strut in its numerator and denominator,
+// so all fractions are the same height whatever is in them ("x" is shorter
+// than "3"). Fractions side by side in a line then have their bars at
+// exactly the same height.
+function strutFractions(tex: string): string {
+  let out = "";
+  let i = 0;
+  while (i < tex.length) {
+    if (tex.startsWith("\\dfrac{", i)) {
+      out += "\\dfrac{\\vphantom{0}";
+      i += "\\dfrac{".length;
+      // copy the numerator up to its closing brace, then strut the denominator
+      let depth = 1;
+      let num = "";
+      while (i < tex.length && depth > 0) {
+        const ch = tex[i];
+        if (ch === "{") depth++;
+        else if (ch === "}") depth--;
+        if (depth > 0) num += ch;
+        i++;
+      }
+      out += strutFractions(num) + "}";
+      if (tex[i] === "{") {
+        out += "{\\vphantom{0}";
+        i++;
+      }
+      continue;
+    }
+    out += tex[i];
+    i++;
+  }
+  return out;
+}
+
+// Every bit of math on the page goes through here, so fractions are
+// always the same height (see strutFractions).
+function InlineMath({ math }: { math: string }) {
+  return <KatexInlineMath math={strutFractions(math)} />;
+}
+
 function Cell({ math, color, align = "center" }: { math: string; color: string; align?: "center" | "right" | "left" }) {
   const isLeftAlign = math.startsWith(LEFTALIGN_PREFIX);
   const content = isLeftAlign ? math.slice(LEFTALIGN_PREFIX.length) : math;
@@ -576,6 +779,8 @@ function Cell({ math, color, align = "center" }: { math: string; color: string; 
   const isStackedFraction = content.startsWith(STACKEDFRACTION_PREFIX);
   const isMarkedTerm = content.startsWith(MARKEDTERM_PREFIX);
   const isMarkedFraction = content.startsWith(MARKEDFRACTION_PREFIX);
+  const isMarkedReciprocal = content.startsWith(MARKEDRECIP_PREFIX);
+  const isStackTop = content.startsWith(STACKTOP_PREFIX);
   const isMarkedParenFraction = content.startsWith(MARKEDPARENFRACTION_PREFIX);
   const isParenMult = content.startsWith(PARENMULT_PREFIX);
   const isMarkedParenMult = content.startsWith(MARKEDPARENMULT_PREFIX);
@@ -595,6 +800,10 @@ function Cell({ math, color, align = "center" }: { math: string; color: string; 
         renderStackedFraction(math_.slice(STACKEDFRACTION_PREFIX.length), color)
       ) : isMarkedFraction ? (
         renderMarkedFraction(math_.slice(MARKEDFRACTION_PREFIX.length), color)
+      ) : isStackTop ? (
+        renderStackTop(math_.slice(STACKTOP_PREFIX.length), color)
+      ) : isMarkedReciprocal ? (
+        renderMarkedReciprocal(math_.slice(MARKEDRECIP_PREFIX.length), color)
       ) : isMarkedParenFraction ? (
         renderMarkedParenFraction(math_.slice(MARKEDPARENFRACTION_PREFIX.length), color)
       ) : isMarkedParenMultReversed ? (
@@ -1506,6 +1715,80 @@ function naturalSign(c: string): string {
     .replace(/^((?:[A-Z]+:)*\u0003?)-(?:\\:|\\hspace\{0\.5em\})/, "$1-");
 }
 
+
+// Proportions: two crossing loops, each circling one diagonal pair of a
+// row that is one fraction = one fraction (top-left with bottom-right,
+// bottom-left with top-right). Measured from the rendered fractions, drawn
+// as an overlay so the row itself never moves or resizes.
+function CrossLoops({ containerRef, slotId, color }: { containerRef: { current: HTMLDivElement | null }; slotId: string; color: string }) {
+  const [loops, setLoops] = useState<{ cx: number; cy: number; rx: number; ry: number; angle: number }[]>([]);
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const measure = () => {
+      const fracs = Array.from(container.querySelectorAll<HTMLElement>(`[data-row-slot="${slotId}"] .mfrac`));
+      if (fracs.length < 2) return setLoops([]);
+      const base = container.getBoundingClientRect();
+      // Center of the numerator and the denominator of one fraction.
+      const parts = (frac: HTMLElement) => {
+        const pieces = Array.from(frac.querySelectorAll<HTMLElement>(".vlist > span"))
+          .filter((el) => (el.textContent ?? "").trim() !== "")
+          .map((el) => (el.lastElementChild as HTMLElement | null) ?? el)
+          .map((el) => el.getBoundingClientRect())
+          .sort((a, b) => a.top - b.top);
+        const c = (r: DOMRect) => ({ x: r.left + r.width / 2 - base.left, y: r.top + r.height / 2 - base.top, w: r.width, h: r.height });
+        return { top: c(pieces[0]), bottom: c(pieces[pieces.length - 1]) };
+      };
+      const L = parts(fracs[0]);
+      const R = parts(fracs[fracs.length - 1]);
+      const loop = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => {
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy);
+        const pad = Math.max(a.w, b.w) / 2 + 12;
+        return {
+          cx: (a.x + b.x) / 2,
+          cy: (a.y + b.y) / 2,
+          rx: len / 2 + pad,
+          ry: Math.max(a.h, b.h) / 2 + 9,
+          angle: (Math.atan2(dy, dx) * 180) / Math.PI,
+        };
+      };
+      setLoops([loop(L.top, R.bottom), loop(L.bottom, R.top)]);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(container);
+    document.fonts?.ready.then(measure).catch(() => {});
+    return () => ro.disconnect();
+  }, [containerRef, slotId]);
+  if (loops.length === 0) return null;
+  return (
+    <svg
+      aria-hidden="true"
+      style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}
+    >
+      <style>{`@keyframes mm-loop-draw { from { stroke-dashoffset: 1.05; } to { stroke-dashoffset: 0; } }`}</style>
+      {loops.map((l, i) => (
+        <ellipse
+          key={i}
+          cx={l.cx}
+          cy={l.cy}
+          rx={l.rx}
+          ry={l.ry}
+          transform={`rotate(${l.angle} ${l.cx} ${l.cy})`}
+          fill="none"
+          stroke={color}
+          strokeWidth={2}
+          pathLength={1}
+          strokeDasharray={1.05}
+          style={{ animation: `mm-loop-draw 0.6s ease-out ${i * 0.35}s both` }}
+        />
+      ))}
+    </svg>
+  );
+}
+
 function AnchoredEquation({
   rows,
   slotIds,
@@ -1514,6 +1797,7 @@ function AnchoredEquation({
   eqColumnIndex,
   distributeAnnotations,
   arcReserveSlots,
+  crossLoops,
 }: {
   rows: GridRow[];
   slotIds: string[];
@@ -1522,8 +1806,111 @@ function AnchoredEquation({
   eqColumnIndex: number;
   distributeAnnotations: ComputedAnnotation[];
   arcReserveSlots: Set<string>;
+  crossLoops?: { slotId: string; shown: boolean };
 }) {
   const e = eqColumnIndex;
+  const gridRef = useRef<HTMLDivElement>(null);
+  // The proportion row is spread out around its "=" from the very first
+  // step, so the cross-multiply loops are long and thin (like drawing them
+  // by hand) and each one circles only its own two numbers.
+  const loopGap = (slotId: string) => (crossLoops && crossLoops.slotId === slotId ? 26 : undefined);
+
+  // A line written under another (like "-11" under "12") lines up with the
+  // right edge of the term above it and may stick out further left than
+  // anything else. Every line is already laid out (hidden ones too), so
+  // measure how far the work reaches past the left edge and leave that
+  // much room - from the first step, so nothing is ever cut off and
+  // nothing moves.
+  const [overhang, setOverhang] = useState(0);
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const measure = () => {
+      const left = grid.getBoundingClientRect().left;
+      let min = 0;
+      grid.querySelectorAll<HTMLElement>(".katex").forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (r.width > 0) min = Math.min(min, r.left - left);
+      });
+      setOverhang(min < 0 ? Math.ceil(-min) + 2 : 0);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(grid);
+    return () => ro.disconnect();
+  }, [slotOrderAll.join("|")]);
+
+  // Fractions drawn by hand (crossed-out numbers, reciprocals) and KaTeX's
+  // own fractions can land a pixel or two apart on the same line. After
+  // every update, nudge each hand-drawn fraction so its bar sits at exactly
+  // the height of the KaTeX fraction bar on that line. (A visual nudge only
+  // - it doesn't change the layout, so nothing else moves.)
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const bySlot: Record<string, HTMLElement[]> = {};
+    grid.querySelectorAll<HTMLElement>("[data-row-slot]").forEach((el) => {
+      (bySlot[el.getAttribute("data-row-slot")!] ||= []).push(el);
+    });
+    for (const els of Object.values(bySlot)) {
+      const katexBar = els.flatMap((el) => Array.from(el.querySelectorAll<HTMLElement>(".frac-line")))[0];
+      const bars = els.flatMap((el) =>
+        Array.from(el.querySelectorAll<HTMLElement>("span")).filter((sp) => sp.style.borderTop.includes("solid"))
+      );
+      for (const bar of bars) {
+        const stack = bar.parentElement as HTMLElement;
+        stack.style.transform = "";
+        if (!katexBar) continue;
+        const delta = katexBar.getBoundingClientRect().top - bar.getBoundingClientRect().top;
+        if (Math.abs(delta) > 0.25 && Math.abs(delta) < 8) stack.style.transform = `translateY(${delta}px)`;
+      }
+    }
+  });
+
+  // A line that later gets divided in place ("3x = 21" becoming
+  // "3x/3 = 21/3") is drawn at the top of its space from the start, so
+  // when the fraction bars and denominators appear they're simply added
+  // underneath - the numbers and "=" stay exactly where they were.
+  const isDivision = (c: string) => /^\\dfrac\{[^{}]*\}\{[^{}]*\}$/.test(c) || c.startsWith("MARKEDFRACTION:");
+  const hasFraction = (c: string) => /\\dfrac|\\frac|MARKEDFRACTION:|MARKEDPARENFRACTION:|STACKEDFRACTION:|MARKEDRECIP:/.test(c);
+  const topAligned = new Set(
+    slotOrderAll.filter((id) => {
+      const versions = (slotVersions[id] ?? []).filter((r) => r.caption === undefined);
+      // The line is written out (possibly a piece at a time) with no
+      // fractions, then divided: the first fractioned version divides
+      // every term of the last plain one, and nothing else.
+      const firstFrac = versions.findIndex((r) => r.cells.some(hasFraction));
+      if (firstFrac < 1) return false;
+      const flat = versions[firstFrac - 1];
+      if (versions.slice(0, firstFrac).some((r) => r.cells.some((c) => /^[A-Z]+:/.test(c)))) return false;
+      // Every later version is exactly that division (plain, or with the
+      // canceled numbers crossed out).
+      return versions
+        .slice(firstFrac)
+        .every((d) => d.cells.every((c, i) => i === e || (isBlankCell(flat.cells[i]) ? isBlankCell(c) : isDivision(c))));
+    })
+  );
+
+  // Denominator each column of a top-aligned line will get, so the flat
+  // version can hold that space (invisibly) from the start.
+  const futureDen: Record<string, Record<number, string>> = {};
+  for (const id of topAligned) {
+    const d = (slotVersions[id] ?? []).find((r) => r.cells.some(hasFraction));
+    futureDen[id] = {};
+    d?.cells.forEach((c, i) => {
+      const m = c.match(/^\\dfrac\{(.*)\}\{(.*)\}$/);
+      if (m) futureDen[id][i] = m[2];
+      else if (c.startsWith("MARKEDFRACTION:")) futureDen[id][i] = c.slice(c.indexOf("\u0005") + 1);
+    });
+  }
+  const SEP = "\u0005";
+  function topify(c: string, slotId: string | undefined, col: number): string {
+    if (!slotId || !topAligned.has(slotId) || isBlankCell(c) || c.startsWith("MARKEDFRACTION:")) return c;
+    if (col === e) return `STACKTOP:0${SEP}${c}${SEP}0`;
+    const m = c.match(/^\\dfrac\{(.*)\}\{(.*)\}$/);
+    if (m) return `STACKTOP:1${SEP}${m[1]}${SEP}${m[2]}`;
+    return `STACKTOP:0${SEP}${c}${SEP}${futureDen[slotId][col] ?? "0"}`;
+  }
 
   function colorFor(highlight: GridRow["highlight"]): string {
     if (highlight === "success" || highlight === "phase-green") return "var(--green)";
@@ -1635,7 +2022,7 @@ function AnchoredEquation({
                 aria-hidden="true"
                 style={{ gridRow: 1, gridColumn: i + 1, width: 0, overflow: "hidden", visibility: "hidden", paddingTop: padTop || undefined }}
               >
-                <Cell math={texSpacing(v.cells[c] ?? "")} color="var(--ink)" align={align} />
+                <Cell math={topify(texSpacing(v.cells[c] ?? ""), slotId, c)} color="var(--ink)" align={align} />
               </div>
             ))
           )}
@@ -1654,7 +2041,7 @@ function AnchoredEquation({
                   style={{ gridRow: 1, gridColumn: `${i + 1} / span 2`, justifySelf: side === "left" ? "end" : "start" }}
                 >
                   <DistributeDiagram
-                    coefficient={ann.coefficient}
+                    coefficient={texSpacing(ann.coefficient)}
                     term1={texSpacing(ann.term1)}
                     term2={texSpacing(ann.term2)}
                     arcsShown={ann.arcsShown}
@@ -1695,7 +2082,7 @@ function AnchoredEquation({
             const text = texSpacing(row.cells[c] ?? "");
             return (
               <div key={c} data-row-slot={dataSlot} style={{ gridRow: 1, gridColumn: i + 1, paddingTop: padTop || undefined }}>
-                <Cell math={c === firstOnSide ? naturalSign(text) : spaceJoiningSign(text)} color={color} align={align} />
+                <Cell math={topify(c === firstOnSide ? naturalSign(text) : spaceJoiningSign(text), slotId, c)} color={color} align={align} />
               </div>
             );
           })}
@@ -1706,9 +2093,11 @@ function AnchoredEquation({
   const groups = Array.from(new Set(slotOrderAll.map((id) => groupOf[id])));
 
   return (
-    <div style={{ overflowX: "auto", width: "100%", paddingTop: 14, paddingBottom: 4 }}>
+    <div style={{ overflowX: "auto", width: "100%", paddingTop: 14, paddingBottom: 4, paddingLeft: Math.max(crossLoops ? 18 : 0, overhang) || undefined }}>
       <div
+        ref={gridRef}
         style={{
+          position: "relative",
           display: "grid",
           gridTemplateColumns: "auto auto auto",
           width: "fit-content",
@@ -1774,7 +2163,7 @@ function AnchoredEquation({
           const reserve = arcReserveSlots.has(slotId) || distributeAnnotations.some((a) => a.targetSlotId === slotId && a.arcsShown > 0);
           const eqSym = row.cells[e] ?? "";
           return [
-            <div key={`${slotId}-l`} aria-hidden={hidden || undefined} style={{ ...hide, gridRow, gridColumn: 1, justifySelf: "end", marginBottom: mb }}>
+            <div key={`${slotId}-l`} aria-hidden={hidden || undefined} style={{ ...hide, gridRow, gridColumn: 1, justifySelf: "end", marginBottom: mb, paddingRight: loopGap(slotId) }}>
               <SideBlock group={group} side="left" row={row} slotId={slotId} hidden={hidden} />
             </div>,
             <div
@@ -1783,13 +2172,26 @@ function AnchoredEquation({
               aria-hidden={hidden || undefined}
               style={{ ...hide, gridRow, gridColumn: 2, textAlign: "center", color: "var(--ink-soft)", whiteSpace: "nowrap", paddingTop: reserve ? 34 : undefined, marginBottom: mb }}
             >
-              {eqSym ? <InlineMath math={eqSym} /> : null}
+              {eqSym
+                ? topAligned.has(slotId)
+                  ? (
+                    // Same line height as the cells beside it, so the stacks
+                    // line up exactly.
+                    <div style={{ lineHeight: 1.8 }}>
+                      {/* The "=" stays exactly where it was in "-3x = 21" -
+                          level with the numbers - when the bars appear. */}
+                      {renderStackTop(`0${"\u0005"}${eqSym}${"\u0005"}0`, "var(--ink-soft)")}
+                    </div>
+                  )
+                  : <InlineMath math={eqSym} />
+                : null}
             </div>,
-            <div key={`${slotId}-r`} aria-hidden={hidden || undefined} style={{ ...hide, gridRow, gridColumn: 3, justifySelf: "start", marginBottom: mb }}>
+            <div key={`${slotId}-r`} aria-hidden={hidden || undefined} style={{ ...hide, gridRow, gridColumn: 3, justifySelf: "start", marginBottom: mb, paddingLeft: loopGap(slotId) }}>
               <SideBlock group={group} side="right" row={row} slotId={slotId} hidden={hidden} />
             </div>,
           ];
         })}
+        {crossLoops?.shown && <CrossLoops containerRef={gridRef} slotId={crossLoops.slotId} color="var(--blue)" />}
       </div>
     </div>
   );
@@ -1886,6 +2288,22 @@ export default function StepSolver({
   }
 
   const visibleRows: (GridRow | PairedGridRow)[] = slotOrder.map((id) => slotContent[id]);
+
+  // Proportions: the cross-multiply loops, once that step is answered.
+  const crossLoopsIdx = instance.crossLoops ? instance.steps.findIndex((st) => st.stepId === instance.crossLoops!.afterStepId) : -1;
+  const crossLoopsState = instance.crossLoops
+    ? {
+        slotId: instance.crossLoops.slotId,
+        shown: crossLoopsIdx !== -1 && (stepIndex > crossLoopsIdx || (stepIndex === crossLoopsIdx && revealed)),
+      }
+    : undefined;
+
+  // A step whose correct answer is a number line (inequalities): once it's
+  // answered, that graph is drawn under the solution too.
+  const graphStepIdx = instance.steps.findIndex((st) => st.choices.some((c) => c.isCorrect && c.text.startsWith(GRAPH_PREFIX)));
+  const answerGraph =
+    graphStepIdx === -1 ? null : instance.steps[graphStepIdx].choices.find((c) => c.isCorrect)!.text;
+  const answerGraphShown = graphStepIdx !== -1 && (stepIndex > graphStepIdx || (stepIndex === graphStepIdx && revealed));
 
 
   // Systems of equations keep their own layout rules (paired rows, two
@@ -2166,7 +2584,19 @@ export default function StepSolver({
             eqColumnIndex={instance.eqColumnIndex}
             distributeAnnotations={distributeAnnotations}
             arcReserveSlots={new Set([...arcReserveKeys].filter((k) => k.endsWith("|")).map((k) => k.slice(0, -1)))}
+            crossLoops={crossLoopsState}
           />
+        )}
+        {/* The finished number line, under the work. Its room is held from
+            the first step (invisible until the graph question is answered),
+            so nothing moves and the card never grows when it appears. */}
+        {!isSystem && answerGraph && (
+          <div
+            aria-hidden={!answerGraphShown}
+            style={{ visibility: answerGraphShown ? "visible" : "hidden", maxWidth: 340, marginTop: 4 }}
+          >
+            <NumberLineGraph {...parseGraphChoice(answerGraph)} markerId="answer-graph" color="var(--green)" align="left" />
+          </div>
         )}
         {isSystem ? (
           revealed &&
@@ -2184,22 +2614,30 @@ export default function StepSolver({
             </div>
           )
         ) : (
-          // Always holds two lines of room, so the explanation appearing
-          // never makes the card taller.
+          // Holds the room of the tallest explanation in the problem
+          // (invisible copies stacked in one grid cell, at least two lines),
+          // so an explanation appearing never makes the card taller - even
+          // one with a stacked fraction in it.
           <div
             style={{
               marginTop: 6,
               minHeight: 40,
+              display: "grid",
               fontFamily: "var(--font-body)",
               fontSize: 13,
               color: "var(--green)",
               fontWeight: 600,
             }}
           >
+            {instance.steps.map((st, si) => (
+              <div key={`eprobe-${si}`} aria-hidden="true" style={{ gridArea: "1 / 1", visibility: "hidden", pointerEvents: "none" }}>
+                ✓ <MixedText content={st.explanationOnCorrect} />
+              </div>
+            ))}
             {revealed && currentStep && (
-              <>
+              <div style={{ gridArea: "1 / 1" }}>
                 ✓ <MixedText content={currentStep.explanationOnCorrect} />
-              </>
+              </div>
             )}
           </div>
         )}

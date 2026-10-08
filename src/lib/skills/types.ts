@@ -219,4 +219,9 @@ export interface SolverInstance {
   // other variable's value is found, since that's the exact moment it
   // becomes the thing to work on next.
   boldAfter?: { slotId: string; afterStepId: string };
+  // Optional: proportions. Once the given step has been answered, two
+  // crossing loops are drawn around the diagonal pairs of the row whose
+  // two sides are each one fraction (top-left with bottom-right, and
+  // bottom-left with top-right) - the "cross multiply" picture.
+  crossLoops?: { slotId: string; afterStepId: string };
 }

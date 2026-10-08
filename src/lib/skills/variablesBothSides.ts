@@ -166,7 +166,7 @@ export function buildSolverInstance(
       { slotId: initialSlotId, row: initialRowMarked },
       { slotId: "cancel_var_annotation", row: cancelVarRowMarked },
     ],
-    prompt: `What is ${opAbs}${x} ${opSym} ${opAbs}${x}?`,
+    prompt: `What is ${opSym === "+" ? "-" : ""}${opAbs}${x} ${opSym} ${opAbs}${x}?`,
     choices: shuffle([
       { text: cancel1Correct, isCorrect: true, misconceptionTag: null },
       { text: cancel1Distractors[0].text, isCorrect: false, misconceptionTag: cancel1Distractors[0].tag },
@@ -274,7 +274,7 @@ export function buildSolverInstance(
       { slotId: "after_var_elim", row: afterVarRowMarked },
       { slotId: "cancel_const_annotation", row: cancelConstRowMarked },
     ],
-    prompt: `What is ${op2Abs} ${op2Sym} ${op2Abs}?`,
+    prompt: `What is ${op2Sym === "+" ? "-" : ""}${op2Abs} ${op2Sym} ${op2Abs}?`,
     choices: shuffle([
       { text: cancel2Correct, isCorrect: true, misconceptionTag: null },
       { text: cancel2Distractors[0].text, isCorrect: false, misconceptionTag: cancel2Distractors[0].tag },

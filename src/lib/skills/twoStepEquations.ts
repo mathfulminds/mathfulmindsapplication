@@ -344,7 +344,7 @@ export function buildSolverInstance(
       { slotId: initialSlotId, row: initialRowMarked },
       { slotId: "cancel_annotation", row: cancelRowMarked },
     ],
-    prompt: `What is ${absB} ${constOpSym} ${absB}?`,
+    prompt: `What is ${constantIsPositive ? absB : -absB} ${constOpSym} ${absB}?`,
     choices: shuffle([
       { text: "0", isCorrect: true, misconceptionTag: null },
       { text: cancelConstDistractors[0].text, isCorrect: false, misconceptionTag: cancelConstDistractors[0].tag },
