@@ -23,6 +23,15 @@ import { generateMultiStepEquationsNoParenthesesInstance } from "@/lib/skills/mu
 import { generateMultiStepEquationsWithParenthesesInstance } from "@/lib/skills/multiStepEquationsWithParentheses";
 import { generateProportionInstance } from "@/lib/skills/proportions";
 import { generateDistributeNegativeInstance } from "@/lib/skills/distributeNegative";
+import { generateDecimalPercentInstance } from "@/lib/skills/decimalPercent";
+import { generateBothSidesInequalityInstance } from "@/lib/skills/variablesBothSidesInequalities";
+import { generateCompoundInequalityInstance } from "@/lib/skills/compoundInequalities";
+import { generateLiteralInstance } from "@/lib/skills/literalEquations";
+import { generatePowerInstance } from "@/lib/skills/squareCubeRoots";
+import { generateAbsInstance } from "@/lib/skills/absoluteValue";
+import { generateAbsIneqInstance } from "@/lib/skills/absoluteValueInequalities";
+import { generateSqInstance } from "@/lib/skills/quadraticsSquareRoots";
+import { generateFactorInstance } from "@/lib/skills/quadraticsFactoring";
 import { generateOneStepRationalInstance } from "@/lib/skills/oneStepRational";
 import { generateEliminationInstance } from "@/lib/skills/systemsElimination";
 import { generateSubstitutionInstanceTwoTrack } from "@/lib/skills/systemsSubstitutionHorizontal";
@@ -52,6 +61,7 @@ export const SKILL_GROUPS: SkillExampleGroup[] = [
         generate: () => generateOneStepRationalInstance(Math.random() < 0.5 ? "fraction" : "decimal"),
       },
       { title: "Two-Step Equations", skill: SKILLS.twoStepEq, generate: generateTwoStepInstance },
+      { title: "Decimal & Percent Equations", skill: SKILLS.decPct, generate: generateDecimalPercentInstance },
       { title: "Proportions", skill: SKILLS.proportion, generate: generateProportionInstance },
       { title: "Equations with Parentheses", skill: SKILLS.parenEq, generate: generateParenthesesEquationInstance },
       { title: "Distributing a Negative", skill: SKILLS.distNeg, generate: generateDistributeNegativeInstance },
@@ -74,6 +84,9 @@ export const SKILL_GROUPS: SkillExampleGroup[] = [
         skill: SKILLS.multiWithParen,
         generate: generateMultiStepEquationsWithParenthesesInstance,
       },
+      { title: "Literal Equations", skill: SKILLS.literal, generate: generateLiteralInstance },
+      { title: "Square & Cube Roots", skill: SKILLS.roots, generate: generatePowerInstance },
+      { title: "Absolute Value Equations", skill: SKILLS.absEq, generate: generateAbsInstance },
     ],
   },
   {
@@ -83,12 +96,15 @@ export const SKILL_GROUPS: SkillExampleGroup[] = [
       { title: "One-Step Inequalities", skill: SKILLS.oneStepIneq, generate: generateOneStepInequalityInstance },
       { title: "Two-Step Inequalities", skill: SKILLS.twoStepIneq, generate: generateTwoStepInequalityInstance },
       { title: "Inequalities with Parentheses", skill: SKILLS.parenIneq, generate: generateParenthesesInequalityInstance },
+      { title: "Variables on Both Sides", skill: SKILLS.bothSidesIneq, generate: generateBothSidesInequalityInstance },
       { title: "Fractional Coefficients", skill: SKILLS.fracIneq, generate: generateFractionalCoefficientsInequalityInstance },
       {
         title: "Non-Integer Inequalities",
         skill: SKILLS.nonIntIneq,
         generate: () => generateNonIntegerInequalityInstance("fraction"),
       },
+      { title: "Compound Inequalities", skill: SKILLS.compoundIneq, generate: generateCompoundInequalityInstance },
+      { title: "Absolute Value Inequalities", skill: SKILLS.absIneq, generate: generateAbsIneqInstance },
     ],
   },
   {
@@ -99,18 +115,50 @@ export const SKILL_GROUPS: SkillExampleGroup[] = [
       { title: "Elimination", skill: SKILLS.elimination, generate: () => generateEliminationInstance() },
     ],
   },
+  {
+    label: "Quadratics",
+    color: "var(--gold)",
+    skills: [
+      { title: "Quadratics by Square Roots", skill: SKILLS.quadSqrt, generate: generateSqInstance },
+      { title: "Quadratics by Factoring", skill: SKILLS.quadFactor, generate: generateFactorInstance },
+    ],
+  },
 ];
 
 // Turns a generated problem's first row (the problem as stated) into
 // LaTeX for the editor: drop the grid's spacing/blank-cell markers and
 // join the cells back into one line.
+// Removes \mathllap{\textcolor{transparent}{...}} / \mathrlap{...} invisible copies
+// (a line holding room for a square root that appears later).
+function dropGhosts(t: string): string {
+  for (const cmd of ["\\mathllap{\\textcolor{transparent}{", "\\mathrlap{\\textcolor{transparent}{"]) {
+    let i = t.indexOf(cmd);
+    while (i !== -1) {
+      let depth = 2;
+      let j = i + cmd.length;
+      while (j < t.length && depth > 0) {
+        if (t[j] === "{") depth++;
+        else if (t[j] === "}") depth--;
+        j++;
+      }
+      t = t.slice(0, i) + t.slice(j);
+      i = t.indexOf(cmd);
+    }
+  }
+  return t;
+}
+
 function cellsToLatex(cells: readonly string[]): string {
   return cells
     .map((c) =>
-      c
+      dropGhosts(c)
+        .replace(/^SPILL:([^\u0005]*)\u0005/, "$1 ")
         .replace(/^(LEFTALIGN:|PLAINTEXT:|MARKEDTERM:)+/, "")
         .replace(/[\u0003\u0004]/g, "")
         .replace(/\\hspace\{[^}]*\}/g, "")
+        // compound inequalities: a second sign, and "or"/"and"
+        .replace(/\\mkern1mu/g, "")
+        .replace(/\\;\\text\{(or|and)\}\\;/g, "\\text{ $1 }")
         .replace(/\\phantom\{0\}/g, "")
         .replace(/\\textcolor\{[^}]*\}\{([^}]*)\}/g, "$1")
         .replace(/\\dfrac/g, "\\frac")
@@ -121,6 +169,11 @@ function cellsToLatex(cells: readonly string[]): string {
 }
 
 export function exampleLatex(instance: SolverInstance): string {
+  // A word problem loads as its sentence.
+  // A formula loads as the formula plus "for w".
+  const solveFor = instance.problemText?.match(/^Solve for \$(.)\$\.$/);
+  if (solveFor) return `${cellsToLatex((instance.initialRow as GridRow).cells)}\\text{ for ${solveFor[1]}}`;
+  if (instance.problemText) return `\\text{${instance.problemText.replace(/%/g, "\\%")}}`;
   const row = instance.initialRow as GridRow | PairedGridRow;
   if ((row as PairedGridRow).eq1) {
     const paired = row as PairedGridRow;

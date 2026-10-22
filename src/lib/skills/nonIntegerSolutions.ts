@@ -9,8 +9,7 @@ import {
   randSign,
   renderMultiplyTerm,
   renderReciprocal,
-  shuffle,
-} from "./isolateVariableCore";
+  shuffle, divNumerator } from "./isolateVariableCore";
 import {
   Fraction,
   addFraction,
@@ -228,7 +227,7 @@ export function buildNonIntegerSolverInstance(
     // the variable side (numerator/denominator always plain integers,
     // never needs an overline), and the same stacked-layout technique
     // for the constant side as everywhere else in decimal mode.
-    const divSetup = `\\dfrac{${renderMultiplyTerm(a, variableSymbol)}}{${a}}`;
+    const divSetup = `\\dfrac{${divNumerator(a, variableSymbol)}}{${a}}`;
     const divRhs = `STACKEDFRACTION:${decimalExpansionToPlainText(simplifiedRhs)}\u0005${a}`;
     const setupExpr1 = bIsSecond ? divSetup : BLANK;
     const setupExpr2 = bIsSecond ? BLANK : divSetup;

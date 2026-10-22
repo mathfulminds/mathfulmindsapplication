@@ -11,6 +11,12 @@
 // its simplified value alone would silently reorder or rewrite what the
 // student typed - which breaks the "never reorder terms" principle.
 
+import type { Mono } from "@/lib/skills/literalEquations";
+import type { PowerProblem } from "@/lib/skills/squareCubeRoots";
+import type { AbsProblem } from "@/lib/skills/absoluteValue";
+import type { AbsIneqProblem } from "@/lib/skills/absoluteValueInequalities";
+import type { SqProblem } from "@/lib/skills/quadraticsSquareRoots";
+import type { FactorProblem } from "@/lib/skills/quadraticsFactoring";
 import type { Fraction } from "@/lib/skills/fraction";
 import { makeFraction, fromInt, addFraction, mulFraction, divFraction, negFraction } from "@/lib/skills/fraction";
 
@@ -71,10 +77,40 @@ export interface ParsedEquation {
   // (which may be a denominator, e.g. 2/3 = 16/x). The variable's spot is
   // null. left/right/linear are left empty for these.
   proportion?: { TL: number | null; BL: number | null; TR: number | null; BR: number | null };
+  // Set for percent problems, solved with is/of = %/100. Exactly one of
+  // isN / ofN / pct is null (the unknown). Typed as a sentence ("What is
+  // 25% of 40?") or an equation ("x = 25% * 40", "25%x = 10").
+  percent?: PercentProblem;
+  // Set for a "sandwich" compound inequality, like -3 < 2x + 1 <= 7. The
+  // middle's terms are in `left` (right is empty), `relation` is the first
+  // sign, and linear is the middle on its own.
+  sandwich?: { left: Fraction; right: Fraction; relation2: Relation };
+  // Set for a formula with more than one letter (a literal equation, like
+  // P = 2l + 2w): each side as terms of a number times letters.
+  literal?: { left: Mono[]; right: Mono[] };
+  // Set for x² / x³ equations (square and cube roots): a·x^n + b = rhs.
+  power?: PowerProblem;
+  // Set for absolute value equations: a·|m x + n| + b = c.
+  abs?: AbsProblem;
+  // Set for an absolute value inequality (|x - 3| < 5).
+  absIneq?: AbsIneqProblem;
+  // Set for a squared expression set equal to a number ((x - 3)² = 16).
+  sqRoot?: SqProblem;
+  // Set for x² + bx + c = 0 (factoring).
+  factor?: FactorProblem;
+}
+
+export interface PercentProblem {
+  isN: Fraction | null;
+  ofN: Fraction | null;
+  pct: Fraction | null;
+  phrasing: "whatIs" | "whatNumberIs" | "whatPercent" | "isOfWhat";
 }
 
 export type ParseResult =
-  | { ok: true; equations: ParsedEquation[] }
+  // join: two inequalities written with "or" / "and" between them (a
+  // compound inequality, not a system).
+  | { ok: true; equations: ParsedEquation[]; join?: "and" | "or"; target?: string }
   | { ok: false; error: string };
 
 // ---------- errors ----------
@@ -84,6 +120,7 @@ class InputError extends Error {}
 // ---------- normalization ----------
 
 const SEPARATOR = "\n";
+const OR_SEPARATOR = "\u0007";
 
 function normalize(raw: string): string {
   let s = raw;
@@ -104,13 +141,25 @@ function normalize(raw: string): string {
   s = s.replace(/\\\\/g, SEPARATOR);
   s = s.replace(/\\text\{\s*and\s*\}/g, SEPARATOR);
   s = s.replace(/\\(text|mathrm|mathit|mathbf|operatorname)\{([^}]*)\}/g, "$2");
+  // "x < 2 or x > 5" - a compound inequality
+  // (the editor drops spaces, so "x<2orx>5" too - "or" is never math)
+  s = s.replace(/(?<![a-zA-Z\\])or(?=[a-zA-Z]?(?![a-zA-Z]))/gi, OR_SEPARATOR);
 
   // Pure-presentation LaTeX that carries no math meaning.
+  // A word problem whose "?" the editor turned into the start of a fraction
+  // ("...of 40?" -> 40 over an empty box): read it as the question mark.
+  if (/[a-zA-Z]{2,}/.test(s.replace(/\\[a-zA-Z]+/g, " "))) {
+    s = s.replace(/\\frac\{([^{}]*)\}\{\\placeholder(?:\[[^\]]*\])?\{\}\}\s*$/, "$1?");
+  }
   // An empty box the student hasn't filled in yet (from the math editor).
   if (/\\placeholder/.test(s)) {
     throw new InputError("There's still an empty box in the problem. Fill it in (or delete it), then try again.");
   }
   s = s.replace(/\\mleft|\\mright|\\left|\\right|\\displaystyle|\\big|\\Big|\\bigg|\\Bigg/g, "");
+  s = s.replace(/\\(lvert|rvert|vert|mid)(?![a-zA-Z])/g, "|");
+  s = s.replace(/\\%/g, "%");
+  // "15% of x" -> "15% * x"
+  s = s.replace(/%\s*of\s*/gi, "%*");
   s = s.replace(/\\[{}]/g, ""); // \{ \} - the big brace in front of a system
   s = s.replace(/\\(quad|qquad)/g, " ");
   s = s.replace(/\\[,;:! ]/g, " ");
@@ -131,7 +180,7 @@ function normalize(raw: string): string {
 
   // Plain-text system separators: newlines, semicolons, the word "and",
   // and commas (no decimal-comma support - "2,5" is not a number here).
-  s = s.replace(/\band\b/gi, SEPARATOR);
+  s = s.replace(/(?<![a-zA-Z\\])and(?=[a-zA-Z]?(?![a-zA-Z]))/gi, SEPARATOR);
   s = s.replace(/[;,]/g, SEPARATOR);
   return s;
 }
@@ -180,7 +229,12 @@ function tokenize(s: string): Token[] {
       }
       if (cmd === "neq" || cmd === "ne") throw new InputError("\"Not equal to\" (≠) problems aren't supported yet. Right now you can solve linear equations, linear inequalities, and systems of two linear equations.");
       if (cmd === "sqrt") throw new InputError("Square roots and other roots aren't supported yet. Right now you can solve linear equations, linear inequalities, and systems of two linear equations.");
-      if (cmd === "pi") throw new InputError("Problems with π aren't supported yet. Right now you can solve linear equations, linear inequalities, and systems of two linear equations.");
+      if (cmd === "pi") {
+        // π: allowed in formulas (literal equations), checked below otherwise
+        tokens.push({ t: "var", name: "π" });
+        i = j;
+        continue;
+      }
       if (cmd === "pm" || cmd === "mp") throw new InputError("The ± symbol isn't supported here.");
       throw new InputError(cmd ? `I don't recognize "\\${cmd}".` : "There's a stray backslash in the problem.");
     }
@@ -277,7 +331,7 @@ class Parser {
     return this.pos >= this.tokens.length;
   }
 
-  parseRelation(): { left: Node; relation: Relation; right: Node } {
+  parseRelation(): { left: Node; relation: Relation; right: Node; relation2?: Relation; right2?: Node } {
     if (this.atEnd()) throw new InputError("Type an equation or inequality to get started.");
     const left = this.parseExpr();
     const relTok = this.next();
@@ -286,7 +340,16 @@ class Parser {
     if (this.atEnd()) throw new InputError("There's nothing on the right side of the equals sign.");
     const right = this.parseExpr();
     const after = this.peek();
-    if (after && after.t === "rel") throw new InputError("Compound inequalities (like 1 < x < 5) aren't supported yet.");
+    if (after && after.t === "rel") {
+      // A compound inequality written in one line: 1 < 2x + 3 < 9.
+      this.next();
+      if (this.atEnd()) throw new InputError("There's nothing after the second inequality sign.");
+      const right2 = this.parseExpr();
+      const more = this.peek();
+      if (more && more.t === "rel") throw new InputError("I can only handle up to two inequality signs in a row.");
+      if (more) throw new InputError("Something in the problem doesn't fit together - check for a missing operator or parenthesis.");
+      return { left, relation: relTok.rel, right, relation2: after.rel, right2 };
+    }
     if (after) throw new InputError("Something in the problem doesn't fit together - check for a missing operator or parenthesis.");
     return { left, relation: relTok.rel, right };
   }
@@ -649,7 +712,7 @@ function toLatex(n: Node): string {
     case "num":
       return n.raw.startsWith(".") ? `0${n.raw}` : n.raw;
     case "var":
-      return n.name;
+      return n.name === "π" ? "\\pi " : n.name;
     case "neg":
       return `-${toLatex(n.x)}`;
     case "group":
@@ -717,30 +780,372 @@ function detectProportion(left: Node, right: Node): { TL: number | null; BL: num
   return { TL: L.top.num, BL: L.bottom.num, TR: R.top.num, BR: R.bottom.num, v: vars[0].v as string };
 }
 
+
+
+function percentSentence(p: PercentProblem): string {
+  const t = (f: Fraction | null) => (f ? `${f.num / f.den}` : "");
+  switch (p.phrasing) {
+    case "whatIs":
+      return `What is ${t(p.pct)}% of ${t(p.ofN)}?`;
+    case "whatNumberIs":
+      return `What number is ${t(p.pct)}% of ${t(p.ofN)}?`;
+    case "whatPercent":
+      return `What % is ${t(p.isN)} out of ${t(p.ofN)}?`;
+    case "isOfWhat":
+      return `${t(p.isN)} is ${t(p.pct)}% of what number?`;
+  }
+}
+
+function percentEquation(p: PercentProblem, v: string): ParsedEquation {
+  return {
+    left: [],
+    right: [],
+    relation: "=",
+    variables: [v],
+    linear: { coefs: {}, constant: fromInt(0) },
+    usesDecimal: false,
+    usesFraction: false,
+    latex: `\\text{${percentSentence(p).replace(/%/g, "\\%")}}`,
+    percent: p,
+  };
+}
+
+// Percent problems, read straight from the text: "15%x = 12" (12 is 15% of
+// what number), "x = 20% * 45" (what is 20% of 45), either way around.
+function detectPercent(chunk: string): { eq: PercentProblem; v: string } {
+  const s = chunk.replace(/\s+/g, "");
+  const N = "(\\d+(?:\\.\\d+)?)";
+  const num = (raw: string) => parseNumber(raw).value;
+  let m = s.match(new RegExp(`^${N}%\\*?([a-zA-Z])=${N}$`));
+  if (m) return { eq: { isN: num(m[3]), ofN: null, pct: num(m[1]), phrasing: "isOfWhat" }, v: m[2] };
+  m = s.match(new RegExp(`^${N}=${N}%\\*?([a-zA-Z])$`));
+  if (m) return { eq: { isN: num(m[1]), ofN: null, pct: num(m[2]), phrasing: "isOfWhat" }, v: m[3] };
+  m = s.match(new RegExp(`^([a-zA-Z])=${N}%\\*?${N}$`));
+  if (m) return { eq: { isN: null, ofN: num(m[3]), pct: num(m[2]), phrasing: "whatIs" }, v: m[1] };
+  m = s.match(new RegExp(`^${N}%\\*?${N}=([a-zA-Z])$`));
+  if (m) return { eq: { isN: null, ofN: num(m[2]), pct: num(m[1]), phrasing: "whatIs" }, v: m[3] };
+  throw new InputError("Percent problems are supported as short questions like \"What is 25% of 40?\", \"What % is 12 out of 48?\" or \"12 is 15% of what number?\"");
+}
+
+// The same problems written as sentences.
+function detectPercentSentence(text: string): PercentProblem | null {
+  // (normalize() has already turned "% of" into "%*".)
+  const s = text.toLowerCase().replace(/\s+/g, "").replace(/[?.]+$/, "").replace(/percent/g, "%").replace(/%\*/g, "%of");
+  const N = "(\\d+(?:\\.\\d+)?)";
+  const num = (raw: string) => parseNumber(raw).value;
+  let m = s.match(new RegExp(`^whatis${N}%of${N}$`));
+  if (m) return { isN: null, ofN: num(m[2]), pct: num(m[1]), phrasing: "whatIs" };
+  m = s.match(new RegExp(`^whatnumberis${N}%of${N}$`));
+  if (m) return { isN: null, ofN: num(m[2]), pct: num(m[1]), phrasing: "whatNumberIs" };
+  m = s.match(new RegExp(`^what%is${N}(?:outof|of)${N}$`));
+  if (m) return { isN: num(m[1]), ofN: num(m[2]), pct: null, phrasing: "whatPercent" };
+  // "15 is what percent of 60?" (the same as "What % is 15 of 60?")
+  m = s.match(new RegExp(`^${N}iswhat%of${N}$`));
+  if (m) return { isN: num(m[1]), ofN: num(m[2]), pct: null, phrasing: "whatPercent" };
+  m = s.match(new RegExp(`^${N}is${N}%of(?:what(?:number)?)$`));
+  if (m) return { isN: num(m[1]), ofN: null, pct: num(m[2]), phrasing: "isOfWhat" };
+  return null;
+}
+
+// Two-or-more-letter runs that are words, not products of letters.
+const NOT_PRODUCTS = new Set(["is", "of", "the", "what", "out", "and", "or", "for", "solve", "find", "if", "to"]);
+
+// A formula's sides as terms: each a number times letters ("2l", "bh",
+// "1/2 bh", "2πr", "bh/2"). Null when it has something else, like
+// parentheses around a sum or a letter in a denominator.
+function literalMono(n: Node): Mono | null {
+  switch (n.t) {
+    case "num":
+      return { coef: n.value, letters: [] };
+    case "var":
+      return { coef: fromInt(1), letters: [n.name] };
+    case "neg": {
+      const m = literalMono(n.x);
+      return m && { coef: negFraction(m.coef), letters: m.letters };
+    }
+    case "group":
+      return n.x.t === "add" ? null : literalMono(n.x);
+    case "mul": {
+      let coef = fromInt(1);
+      const letters: string[] = [];
+      for (const f of n.factors) {
+        const m = literalMono(f);
+        if (!m) return null;
+        coef = mulFraction(coef, m.coef);
+        letters.push(...m.letters);
+      }
+      return { coef, letters };
+    }
+    case "div": {
+      const num = literalMono(n.num);
+      const den = literalMono(n.den);
+      if (!num || !den || den.letters.length > 0 || den.coef.num === 0) return null;
+      return { coef: divFraction(num.coef, den.coef), letters: num.letters };
+    }
+    default:
+      return null;
+  }
+}
+
+function literalSide(n: Node): Mono[] | null {
+  const u = unwrapInvisible(n);
+  const parts = u.t === "add" ? u.terms.map((tm) => ({ sign: tm.sign, node: tm.node })) : [{ sign: 1 as const, node: u }];
+  const out: Mono[] = [];
+  for (const p of parts) {
+    const m = literalMono(p.node);
+    if (!m || m.coef.num === 0) return null;
+    out.push(p.sign === -1 ? { coef: negFraction(m.coef), letters: m.letters } : m);
+  }
+  return out;
+}
+
+function literalSides(left: Node, right: Node): { left: Mono[]; right: Mono[] } | null {
+  const l = literalSide(left);
+  const r = literalSide(right);
+  return l && r ? { left: l, right: r } : null;
+}
+
+// |x - 3| = 5,  2|x - 3| + 1 = 9,  |2x + 1| = 7,  -|x| = -4
+const ABS_HELP = "Absolute value problems are supported in shapes like |x - 3| = 5, |x - 3| < 5 or 2|x + 1| - 4 >= 6 (the absolute value on the left, a number on the right).";
+function detectAbs(chunk: string): ParsedEquation {
+  const s = chunk.replace(/\s+/g, "");
+  const m = s.match(/^([+-]?\d*)\|([^|]+)\|(?:([+-])(\d+))?(<=|>=|<|>|=)(-?\d+)$/);
+  if (!m) {
+    if (/^-?\d+(<=|>=|<|>|=)/.test(s)) throw new InputError("Write it with the absolute value on the left, like |x - 3| = 5 or |x - 3| < 5.");
+    throw new InputError(ABS_HELP);
+  }
+  const coef = (c: string) => (c === "" || c === "+" ? 1 : c === "-" ? -1 : Number(c));
+  const inner = m[2].match(/^([+-]?\d*)([a-zA-Z])(?:([+-])(\d+))?$/);
+  if (!inner) throw new InputError("Inside the absolute value bars, write the variable term first, like |2x - 5| (whole numbers only).");
+  const abs: AbsProblem = {
+    a: coef(m[1]),
+    b: m[3] ? (m[3] === "-" ? -1 : 1) * Number(m[4]) : 0,
+    m: coef(inner[1]),
+    n: inner[3] ? (inner[3] === "-" ? -1 : 1) * Number(inner[4]) : 0,
+    c: Number(m[6]),
+  };
+  if (abs.a === 0 || abs.m === 0) throw new InputError(ABS_HELP);
+  const rel = m[5] as Relation;
+  const SYM = { "<": "<", ">": ">", "<=": "\\leq", ">=": "\\geq" } as const;
+  return {
+    left: [],
+    right: [],
+    relation: rel,
+    variables: [inner[2]],
+    linear: { coefs: {}, constant: fromInt(0) },
+    usesDecimal: false,
+    usesFraction: false,
+    latex: chunk.replace(/\|([^|]+)\|/, "\\left|$1\\right|").replace(/<=/g, "\\leq ").replace(/>=/g, "\\geq "),
+    ...(rel === "=" ? { abs } : { absIneq: { ...abs, sym: SYM[rel as keyof typeof SYM] } }),
+  };
+}
+
+// x² + 4x - 12 = 0 (leading coefficient 1, everything on one side)
+const FACTOR_HELP = "Quadratics by factoring are supported in the shape x² + bx + c = 0, like x² + 4x - 12 = 0 (whole numbers, everything on the left, 0 on the right).";
+function isQuadraticTrinomial(chunk: string): boolean {
+  const s = chunk.replace(/\s+/g, "").replace(/\^\{(\d+)\}/g, "^$1");
+  const m = s.match(/([a-zA-Z])\^2/);
+  if (!m) return false;
+  // another x that isn't squared: x² + 4x ...
+  return new RegExp(`${m[1]}(?!\\^)`).test(s.replace(`${m[1]}^2`, ""));
+}
+function detectQuadratic(chunk: string): ParsedEquation {
+  const s = chunk.replace(/\s+/g, "").replace(/\^\{(\d+)\}/g, "^$1");
+  if (/[<>]/.test(s)) throw new InputError("Quadratic inequalities aren't supported yet.");
+  const m = s.match(/^([+-]?\d*)([a-zA-Z])\^2([+-]\d*)\2([+-]\d+)?=(-?\d+)$/);
+  if (!m) throw new InputError(FACTOR_HELP);
+  if (m[1] !== "" && m[1] !== "+" && m[1] !== "1") throw new InputError("Quadratics with a number in front of x² (like 2x² + 7x + 3 = 0) are their own skill - coming next. For now, try one that starts with x², like x² + 5x + 6 = 0.");
+  if (m[5] !== "0") throw new InputError("First move everything to one side so the other side is 0 - for example, x² + 5x = -6 becomes x² + 5x + 6 = 0.");
+  const coef = (t: string) => (t === "+" ? 1 : t === "-" ? -1 : Number(t));
+  const b = coef(m[3]);
+  const c = m[4] ? Number(m[4]) : 0;
+  if (c === 0) throw new InputError("With no number on its own (like x² + 4x = 0), it factors as x(x + 4) - that kind isn't supported yet.");
+  return {
+    left: [],
+    right: [],
+    relation: "=",
+    variables: [m[2]],
+    linear: { coefs: {}, constant: fromInt(0) },
+    usesDecimal: false,
+    usesFraction: false,
+    latex: chunk,
+    factor: { b, c },
+  };
+}
+
+// (x - 3)² = 16,  2(x + 1)² - 3 = 47,  (2x + 1)^{2} = 49
+const SQ_HELP = "Quadratics by square roots are supported in shapes like (x - 3)² = 16 or 2(x + 1)² - 3 = 47 (the square on the left, a number on the right).";
+function detectSquareRoot(chunk: string): ParsedEquation {
+  const s = chunk.replace(/\s+/g, "").replace(/\^\{(\d+)\}/g, "^$1").replace(/\\cdot|\*/g, "");
+  if (/[<>]/.test(s)) throw new InputError("Inequalities with a square aren't supported yet.");
+  const m = s.match(/^([+-]?\d*)\(([^()]+)\)\^(\d+)(?:([+-])(\d+))?=(-?\d+)$/);
+  if (!m) {
+    if (/^-?\d+=/.test(s)) throw new InputError("Write it with the square on the left, like (x - 3)² = 16.");
+    throw new InputError(SQ_HELP);
+  }
+  if (m[3] !== "2") throw new InputError("Only squares like (x - 3)² are supported here.");
+  const coef = (c: string) => (c === "" || c === "+" ? 1 : c === "-" ? -1 : Number(c));
+  const inner = m[2].match(/^([+-]?\d*)([a-zA-Z])(?:([+-])(\d+))?$/);
+  if (!inner) throw new InputError("Inside the parentheses, write the variable term first, like (2x - 5)² (whole numbers only).");
+  const sq: SqProblem = {
+    a: coef(m[1]),
+    b: m[4] ? (m[4] === "-" ? -1 : 1) * Number(m[5]) : 0,
+    m: coef(inner[1]),
+    n: inner[3] ? (inner[3] === "-" ? -1 : 1) * Number(inner[4]) : 0,
+    c: Number(m[6]),
+  };
+  if (sq.a === 0 || sq.m === 0) throw new InputError(SQ_HELP);
+  return {
+    left: [],
+    right: [],
+    relation: "=",
+    variables: [inner[2]],
+    linear: { coefs: {}, constant: fromInt(0) },
+    usesDecimal: false,
+    usesFraction: false,
+    latex: `${m[1]}\\left(${m[2]}\\right)^2${m[4] ? m[4] + m[5] : ""}=${m[6]}`,
+    sqRoot: sq,
+  };
+}
+
+// x² = 49, 2x^{2} + 3 = 53, 3 + x^2 = 12, 54 = 2x^3, x^2 = 9/16.
+const POWER_HELP = "Equations with exponents are supported in shapes like x² = 49, x³ = -8, or 2x² + 3 = 53 (one x² or x³ term, plus numbers).";
+function detectPower(chunk: string): ParsedEquation {
+  const s = chunk.replace(/\s+/g, "").replace(/\^\{(\d+)\}/g, "^$1");
+  if (/[<>]/.test(s)) throw new InputError("Inequalities with x² or x³ aren't supported yet.");
+  const pw = s.match(/\^(\d+)/);
+  if (pw && pw[1] !== "2" && pw[1] !== "3") throw new InputError("Only squares (x²) and cubes (x³) are supported right now.");
+  const sides = s.split("=");
+  if (sides.length !== 2) throw new InputError(POWER_HELP);
+  const VAL = /^(-?\d+|-?\\frac\{\d+\}\{\d+\})$/;
+  const val = (t: string): Fraction => {
+    const f = t.match(/^(-?)\\frac\{(\d+)\}\{(\d+)\}$/);
+    return f ? makeFraction((f[1] ? -1 : 1) * Number(f[2]), Number(f[3])) : fromInt(Number(t));
+  };
+  const coef = (c: string) => (c === "" || c === "+" ? 1 : c === "-" ? -1 : Number(c));
+  const expr = (t: string) => {
+    let m = t.match(/^([+-]?\d*)([a-zA-Z])\^([23])(?:([+-])(\d+))?$/);
+    if (m) return { a: coef(m[1]), v: m[2], n: Number(m[3]) as 2 | 3, b: m[4] ? (m[4] === "-" ? -1 : 1) * Number(m[5]) : 0, constantFirst: false };
+    m = t.match(/^(-?\d+)([+-])(\d*)([a-zA-Z])\^([23])$/);
+    if (m) return { a: (m[2] === "-" ? -1 : 1) * coef(m[3]), v: m[4], n: Number(m[5]) as 2 | 3, b: Number(m[1]), constantFirst: true };
+    return null;
+  };
+  let e = expr(sides[0]);
+  let orientation: "expressionLeft" | "expressionRight" = "expressionLeft";
+  let other = sides[1];
+  if (!e) {
+    e = expr(sides[1]);
+    orientation = "expressionRight";
+    other = sides[0];
+  }
+  if (!e || !VAL.test(other) || e.a === 0) throw new InputError(POWER_HELP);
+  const rhs = val(other);
+  const power: PowerProblem = { n: e.n, a: e.a, b: e.b, rhs, orientation, constantFirst: e.constantFirst };
+  return {
+    left: [],
+    right: [],
+    relation: "=",
+    variables: [e.v],
+    linear: { coefs: {}, constant: fromInt(0) },
+    usesDecimal: false,
+    usesFraction: rhs.den !== 1,
+    latex: chunk,
+    power,
+  };
+}
+
 export function parseInput(raw: string): ParseResult {
   try {
     const trimmed = raw.trim();
     if (!trimmed) return { ok: false, error: "Type an equation or inequality to get started." };
     const normalized = normalize(trimmed);
 
-    // Runs of 2+ letters ("solve", "xy") are almost always words or
-    // implied products - give a clear message instead of a parse error.
-    const lettersOnly = normalized.replace(/\\[a-zA-Z]+/g, " ");
-    const word = lettersOnly.match(/[a-zA-Z]{2,}/);
+    // A percent question written as a sentence ("What is 25% of 40?").
+    const sentence = detectPercentSentence(normalized);
+    if (sentence) return { ok: true, equations: [percentEquation(sentence, "x")] };
+
+    // "Solve P = 2l + 2w for w": the letter to solve for.
+    let target: string | undefined;
+    let text = normalized.replace(/^\s*solve\b\s*/i, "");
+    const forMatch = text.match(/\s*\bfor\s*([a-zA-Z])\s*[.?]?\s*$/i);
+    if (forMatch) {
+      target = forMatch[1];
+      text = text.slice(0, forMatch.index);
+    }
+    const normalizedMath = text;
+
+    // Runs of letters are products in formulas ("rt", "lwh"), but a real
+    // word ("solve", "what") gets a clear message instead of a parse error.
+    const lettersOnly = normalizedMath.replace(/\\[a-zA-Z]+/g, " ");
+    const word = (lettersOnly.match(/[a-zA-Z]{2,}/g) ?? []).find((w) => w.length >= 5 || NOT_PRODUCTS.has(w.toLowerCase()));
     if (word) {
       throw new InputError(
-        `I'm not sure what "${word[0]}" means here. Type just the math, like 3x + 5 = 11 (variables are single letters).`
+        `I'm not sure what "${word}" means here. Type just the math, like 3x + 5 = 11 (variables are single letters).`
       );
     }
 
-    const chunks = normalized.split(SEPARATOR).map((c) => c.trim()).filter(Boolean);
+    let join: "and" | "or" | undefined;
+    let chunks: string[];
+    if (normalizedMath.includes(OR_SEPARATOR)) {
+      if (normalizedMath.includes(SEPARATOR)) throw new InputError("Use either \"and\" or \"or\" between the two inequalities, not both.");
+      chunks = normalizedMath.split(OR_SEPARATOR).map((c) => c.trim()).filter(Boolean);
+      if (chunks.length !== 2) throw new InputError("Type two inequalities with \"or\" between them, like x + 2 < 1 or 3x > 12.");
+      join = "or";
+    } else {
+      chunks = normalizedMath.split(SEPARATOR).map((c) => c.trim()).filter(Boolean);
+    }
     if (chunks.length === 0) return { ok: false, error: "Type an equation or inequality to get started." };
     if (chunks.length > 2) throw new InputError("I can handle one equation, or a system of two equations - not more yet.");
 
     const equations: ParsedEquation[] = chunks.map((chunk) => {
+      if (chunk.includes("%")) {
+        if (chunks.length > 1) throw new InputError("Percents aren't supported in systems of equations.");
+        const { eq, v } = detectPercent(chunk);
+        return percentEquation(eq, v);
+      }
+      if (chunk.includes("|")) {
+        if (chunks.length > 1) throw new InputError("Absolute values aren't supported in systems of equations.");
+        return detectAbs(chunk);
+      }
+      if (chunk.includes("^") && isQuadraticTrinomial(chunk)) {
+        if (chunks.length > 1) throw new InputError("Exponents aren't supported in systems of equations.");
+        return detectQuadratic(chunk);
+      }
+      if (chunk.includes("^") && /\)\s*\^/.test(chunk)) {
+        if (chunks.length > 1) throw new InputError("Exponents aren't supported in systems of equations.");
+        return detectSquareRoot(chunk);
+      }
+      if (chunk.includes("^")) {
+        if (chunks.length > 1) throw new InputError("Exponents aren't supported in systems of equations.");
+        return detectPower(chunk);
+      }
       const tokens = tokenize(chunk);
       const parser = new Parser(tokens);
-      const { left, relation, right } = parser.parseRelation();
+      const { left, relation, right, relation2, right2 } = parser.parseRelation();
+
+      if (relation2 && right2) {
+        if (chunks.length > 1) throw new InputError("Type one compound inequality at a time.");
+        if (relation === "=" || relation2 === "=") throw new InputError("A compound inequality uses two inequality signs, like -3 < 2x + 1 < 7.");
+        const lo = asSimpleNumber(unwrapInvisible(left)) ?? (asSimpleFraction(left) ? { value: asSimpleFraction(left)!, style: "int" as const } : null);
+        const hi = asSimpleNumber(unwrapInvisible(right2)) ?? (asSimpleFraction(right2) ? { value: asSimpleFraction(right2)!, style: "int" as const } : null);
+        if (!lo || !hi || !hasVar(right)) {
+          throw new InputError("Write a compound inequality with the variable in the middle and a number on each end, like -3 < 2x + 1 <= 7.");
+        }
+        const m = linearize(right);
+        const variables = Object.keys(m.coefs).sort();
+        const terms = classifySide(right, true);
+        return {
+          left: terms,
+          right: [],
+          relation,
+          variables,
+          linear: { coefs: m.coefs, constant: m.c },
+          usesDecimal: anyStyle(terms, (st) => st === "decimal"),
+          usesFraction: anyStyle(terms, (st) => st === "fraction"),
+          latex: `${toLatex(left)} ${REL_LATEX[relation]} ${toLatex(right)} ${REL_LATEX[relation2]} ${toLatex(right2)}`,
+          sandwich: { left: lo.value, right: hi.value, relation2 },
+        };
+      }
 
       const prop = chunks.length === 1 && relation === "=" ? detectProportion(left, right) : null;
       if (prop) {
@@ -756,6 +1161,28 @@ export function parseInput(raw: string): ParseResult {
           latex: `${toLatex(left)} ${REL_LATEX[relation]} ${toLatex(right)}`,
           proportion: nums,
         };
+      }
+
+      // A formula: more than one letter (or π) in a single equation.
+      const letters = new Set(tokens.filter((tk) => tk.t === "var").map((tk) => (tk as { name: string }).name));
+      if (chunks.length === 1 && relation === "=" && (letters.size >= 2 || letters.has("π"))) {
+        const lit = literalSides(left, right);
+        if (lit) {
+          return {
+            left: [],
+            right: [],
+            relation,
+            variables: Array.from(letters).filter((v) => v !== "π").sort(),
+            linear: { coefs: {}, constant: fromInt(0) },
+            usesDecimal: false,
+            usesFraction: false,
+            latex: `${toLatex(left)} = ${toLatex(right)}`,
+            literal: lit,
+          };
+        }
+      }
+      if (letters.has("π")) {
+        throw new InputError("Problems with π are supported in formulas (like C = 2πr), but not here yet.");
       }
 
       const l = linearize(left);
@@ -781,7 +1208,14 @@ export function parseInput(raw: string): ParseResult {
       };
     });
 
-    return { ok: true, equations };
+    if (!join && equations.length === 2 && equations.every((e) => e.relation !== "=" && !e.sandwich)) join = "and";
+    if (join && equations.some((e) => e.relation === "=" || e.sandwich)) {
+      throw new InputError("A compound inequality needs an inequality sign (<, >, ≤, ≥) on both sides of the \"and\" / \"or\".");
+    }
+    if (target && !equations[0]?.literal) {
+      throw new InputError(`"Solve for ${target}" works with formulas that have more than one letter, like P = 2l + 2w. For this problem, just type the equation.`);
+    }
+    return { ok: true, equations, ...(join ? { join } : {}), ...(target ? { target } : {}) };
   } catch (e) {
     if (e instanceof InputError) return { ok: false, error: e.message };
     throw e;

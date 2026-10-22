@@ -52,7 +52,9 @@ function Key({ children }: { children: string }) {
 // A small piece of rendered math inside a sentence.
 function MathBit({ latex }: { latex: string }) {
   return (
-    <span style={{ color: "var(--ink)", fontSize: 15, display: "inline-block", verticalAlign: "middle" }}>
+    // A full-size fraction (not the tiny in-line one), with room above and
+    // below so it never crowds the lines around it.
+    <span style={{ color: "var(--ink)", fontSize: 15, display: "inline-block", verticalAlign: "middle", margin: "4px 2px", lineHeight: 1.2 }}>
       <InlineMath math={latex} />
     </span>
   );
@@ -210,7 +212,7 @@ export default function YourProblemPage() {
           >
             <div style={{ fontSize: 13.5, color: "var(--ink-soft)", lineHeight: 1.5, flex: "1 1 320px" }}>
               <p style={{ margin: "0 0 8px" }}>
-                Use <Key>/</Key> for a fraction. Example: for <MathBit latex={"\\frac{1}{2}"} />, type <Key>1/2</Key>
+                Use <Key>/</Key> for a fraction. Example: for <MathBit latex={"\\dfrac{1}{2}"} />, type <Key>1/2</Key>
               </p>
               <p style={{ margin: "0 0 8px" }}>
                 Use <Key>^</Key> for an exponent. Example: for <MathBit latex="x^2" />, type <Key>x^2</Key>
@@ -400,7 +402,7 @@ export default function YourProblemPage() {
                     color: "var(--ink-soft)",
                   }}
                 >
-                  Solve by:
+                  {solved.result.options[0].skill.id === "literal" ? "Solve for:" : "Solve by:"}
                 </span>
                 <div role="radiogroup" aria-label="Method" style={{ display: "flex", gap: 6 }}>
                   {solved.result.options.map((o, i) => {
@@ -423,7 +425,7 @@ export default function YourProblemPage() {
                           color: active ? "#fff" : "var(--ink)",
                         }}
                       >
-                        {o.label}
+                        {o.skill.id === "literal" ? <InlineMath math={o.label} /> : o.label}
                       </button>
                     );
                   })}

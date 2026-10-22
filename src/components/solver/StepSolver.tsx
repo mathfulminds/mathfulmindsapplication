@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { InlineMath as KatexInlineMath } from "react-katex";
 import "katex/dist/katex.min.css";
-import type { DistributeVisual, GridRow, PairedGridRow, SolverInstance, SolverStep } from "@/lib/skills/types";
+import type { DistributeVisual, GridRow, PairedGridRow, SolverInstance, SolverStep, SideList } from "@/lib/skills/types";
 import Celebration from "@/components/solver/Celebration";
 
 function isPairedRow(row: GridRow | PairedGridRow): row is PairedGridRow {
@@ -233,6 +233,250 @@ function NumberLineGraph({
       {!isWhole && <GraphLabel text={boundary} x={px} y={boundary.startsWith(FRACLABEL_PREFIX) ? y - 30 : y - 14} />}
     </svg>
   );
+}
+
+// Two endpoints (compound inequalities): "GRAPH:{lo}|{hi}|{between|outside}|
+// {loInclusive}|{hiInclusive}". Same look as NumberLineGraph - shaded
+// between the two circles for "and", or two rays pointing away from each
+// other for "or". Whole-number endpoints only.
+function CompoundNumberLineGraph({
+  lo,
+  hi,
+  shape,
+  loInc,
+  hiInc,
+  markerId,
+  color = "var(--ink)",
+  align = "center",
+}: {
+  lo: number;
+  hi: number;
+  shape: "between" | "outside";
+  loInc: boolean;
+  hiInc: boolean;
+  markerId: string;
+  color?: string;
+  align?: "center" | "left";
+}) {
+  // A tick every `unit` so there are never more than about 13 of them.
+  const span = hi - lo;
+  const unit = span <= 8 ? 1 : span <= 16 ? 2 : span <= 40 ? 5 : 10;
+  const first = Math.floor((lo - 2 * unit) / unit) * unit;
+  const last = Math.ceil((hi + 2 * unit) / unit) * unit;
+  const W = 320;
+  const axisL = 8;
+  const axisR = W - 8;
+  const tickL = 34;
+  const tickR = W - 34;
+  const onTick = (v: number) => Number.isInteger(v / unit);
+  const needAbove = !onTick(lo) || !onTick(hi);
+  const y = needAbove ? 34 : 16;
+  const H = y + 32;
+  const xOf = (v: number) => tickL + ((v - first) / (last - first)) * (tickR - tickL);
+  const ticks: number[] = [];
+  for (let n = first; n <= last; n += unit) ticks.push(n);
+  const xl = xOf(lo);
+  const xh = xOf(hi);
+  const word = (inc: boolean) => (inc ? "closed" : "open");
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ width: "100%", maxWidth: W, display: "block", margin: align === "center" ? "0 auto" : 0, overflow: "visible" }}
+      role="img"
+      aria-label={`Number line: ${word(loInc)} circle at ${lo} and ${word(hiInc)} circle at ${hi}, shaded ${
+        shape === "between" ? "between them" : "outward from both"
+      }`}
+    >
+      <defs>
+        <marker id={`${markerId}-ax`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse">
+          <path d="M0,0.5 L8,4 L0,7.5 Z" fill="var(--ink-soft)" />
+        </marker>
+        <marker id={`${markerId}-ray`} markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L5,2.5 L0,5 Z" fill={color} />
+        </marker>
+      </defs>
+      <line
+        x1={axisL + 6}
+        y1={y}
+        x2={axisR - 6}
+        y2={y}
+        stroke="var(--ink-soft)"
+        strokeWidth={1.5}
+        markerStart={`url(#${markerId}-ax)`}
+        markerEnd={`url(#${markerId}-ax)`}
+      />
+      {ticks.map((n) => {
+        const tx = xOf(n);
+        const isAnswer = n === lo || n === hi;
+        return (
+          <g key={n}>
+            <line x1={tx} y1={y - 6} x2={tx} y2={y + 6} stroke="var(--ink-soft)" strokeWidth={1.25} />
+            <text
+              x={tx}
+              y={y + 24}
+              textAnchor="middle"
+              fontSize={isAnswer ? 13 : 12}
+              fontWeight={isAnswer ? 700 : 400}
+              fill={isAnswer ? color : "var(--ink-soft)"}
+            >
+              {tickLabel(n)}
+            </text>
+          </g>
+        );
+      })}
+      {shape === "between" ? (
+        <line x1={xl} y1={y} x2={xh} y2={y} stroke={color} strokeWidth={4} />
+      ) : (
+        <>
+          <line x1={xl} y1={y} x2={axisL + 10} y2={y} stroke={color} strokeWidth={4} markerEnd={`url(#${markerId}-ray)`} />
+          <line x1={xh} y1={y} x2={axisR - 10} y2={y} stroke={color} strokeWidth={4} markerEnd={`url(#${markerId}-ray)`} />
+        </>
+      )}
+      <circle cx={xl} cy={y} r={6.5} fill={loInc ? color : "var(--card)"} stroke={color} strokeWidth={2.5} />
+      <circle cx={xh} cy={y} r={6.5} fill={hiInc ? color : "var(--card)"} stroke={color} strokeWidth={2.5} />
+      {!onTick(lo) && (
+        <text x={xl} y={y - 14} textAnchor="middle" fontSize={13} fontWeight={700} fill={color}>
+          {tickLabel(lo)}
+        </text>
+      )}
+      {!onTick(hi) && (
+        <text x={xh} y={y - 14} textAnchor="middle" fontSize={13} fontWeight={700} fill={color}>
+          {tickLabel(hi)}
+        </text>
+      )}
+    </svg>
+  );
+}
+
+// Two answers as two rays on one number line, both right on the axis
+// (overlapping where they do) - "GRAPH:{v1}|{v2}|rays|{inc1}|{inc2}|{L|R}{L|R}".
+// For compound inequalities with no solution (the rays never overlap) or
+// all real numbers (together they cover the line).
+function RaysNumberLineGraph({
+  rays,
+  markerId,
+  color = "var(--ink)",
+  align = "center",
+}: {
+  rays: { value: number; dir: "left" | "right"; inc: boolean }[];
+  markerId: string;
+  color?: string;
+  align?: "center" | "left";
+}) {
+  const lo = Math.min(...rays.map((r) => r.value));
+  const hi = Math.max(...rays.map((r) => r.value));
+  const span = Math.max(hi - lo, 2);
+  const unit = span <= 8 ? 1 : span <= 16 ? 2 : span <= 40 ? 5 : 10;
+  const first = Math.floor((lo - 2 * unit) / unit) * unit;
+  const last = Math.ceil((hi + 2 * unit) / unit) * unit;
+  const W = 320;
+  const axisL = 8;
+  const axisR = W - 8;
+  const tickL = 34;
+  const tickR = W - 34;
+  const y = 22;
+  const H = y + 34;
+  const xOf = (v: number) => tickL + ((v - first) / (last - first)) * (tickR - tickL);
+  const ticks: number[] = [];
+  for (let n = first; n <= last; n += unit) ticks.push(n);
+  const offsets = [0, 0]; // both rays right on the number line (they can overlap)
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ width: "100%", maxWidth: W, display: "block", margin: align === "center" ? "0 auto" : 0, overflow: "visible" }}
+      role="img"
+      aria-label={`Number line with two rays: ${rays.map((r) => `${r.inc ? "closed" : "open"} circle at ${r.value} pointing ${r.dir}`).join(", and ")}`}
+    >
+      <defs>
+        <marker id={`${markerId}-ax`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse">
+          <path d="M0,0.5 L8,4 L0,7.5 Z" fill="var(--ink-soft)" />
+        </marker>
+        <marker id={`${markerId}-ray`} markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L5,2.5 L0,5 Z" fill={color} />
+        </marker>
+      </defs>
+      <line x1={axisL + 6} y1={y} x2={axisR - 6} y2={y} stroke="var(--ink-soft)" strokeWidth={1.5} markerStart={`url(#${markerId}-ax)`} markerEnd={`url(#${markerId}-ax)`} />
+      {ticks.map((n) => {
+        const tx = xOf(n);
+        const isAnswer = rays.some((r) => r.value === n);
+        return (
+          <g key={n}>
+            <line x1={tx} y1={y - 5} x2={tx} y2={y + 5} stroke="var(--ink-soft)" strokeWidth={1.25} />
+            <text x={tx} y={y + 30} textAnchor="middle" fontSize={isAnswer ? 13 : 12} fontWeight={isAnswer ? 700 : 400} fill={isAnswer ? color : "var(--ink-soft)"}>
+              {tickLabel(n)}
+            </text>
+          </g>
+        );
+      })}
+      {rays.map((r, i) => {
+        const ry = y + offsets[i];
+        const x0 = xOf(r.value);
+        const x1 = r.dir === "left" ? axisL + 10 : axisR - 10;
+        return (
+          <g key={i}>
+            <line x1={x0} y1={ry} x2={x1} y2={ry} stroke={color} strokeWidth={3.5} markerEnd={`url(#${markerId}-ray)`} />
+            <circle cx={x0} cy={ry} r={5.5} fill={r.inc ? color : "var(--card)"} stroke={color} strokeWidth={2.25} />
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// The list shown beside the work (factor pairs of c), one item per line,
+// with the chosen one boxed in the answer color. Always laid out (just
+// invisible until it's shown), so nothing moves when it appears.
+function SideListPanel({ list, shown }: { list: SideList; shown: boolean }) {
+  return (
+    <div aria-hidden={!shown} style={{ visibility: shown ? "visible" : "hidden", flex: "none", paddingTop: 14, fontSize: 20, color: "var(--ink)" }}>
+      <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.3, color: "var(--ink-soft)", marginBottom: 6, whiteSpace: "nowrap" }}>{list.title}</div>
+      {list.items.map((it, i) => {
+        const marked = list.marked === i;
+        return (
+          <div
+            key={i}
+            style={{
+              whiteSpace: "nowrap",
+              padding: "1px 8px",
+              margin: "2px 0",
+              lineHeight: 1.7,
+              color: marked ? "var(--green)" : "var(--ink)",
+              // an outline doesn't take up space, so marking one never moves the list
+              outline: marked ? "1.5px solid var(--ink)" : "none",
+              borderRadius: 4,
+              width: "fit-content",
+            }}
+          >
+            <InlineMath math={it} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Any GRAPH: choice - one endpoint (3 fields), two (5 fields), or two rays (6).
+function GraphFromText({ text, markerId, color, align }: { text: string; markerId: string; color?: string; align?: "center" | "left" }) {
+  const f = text.slice(GRAPH_PREFIX.length).split("|");
+  if (f.length === 6 && f[2] === "rays") {
+    const ray = (v: string, inc: string, d: string) => ({ value: Number(v), inc: inc === "1", dir: d === "L" ? ("left" as const) : ("right" as const) });
+    return <RaysNumberLineGraph rays={[ray(f[0], f[3], f[5][0]), ray(f[1], f[4], f[5][1])]} markerId={markerId} color={color} align={align} />;
+  }
+  if (f.length === 5) {
+    return (
+      <CompoundNumberLineGraph
+        lo={Number(f[0])}
+        hi={Number(f[1])}
+        shape={f[2] === "outside" ? "outside" : "between"}
+        loInc={f[3] === "1"}
+        hiInc={f[4] === "1"}
+        markerId={markerId}
+        color={color}
+        align={align}
+      />
+    );
+  }
+  return <NumberLineGraph {...parseGraphChoice(text)} markerId={markerId} color={color} align={align} />;
 }
 
 function parseGraphChoice(text: string): { boundary: string; direction: "left" | "right"; inclusive: boolean } {
@@ -491,9 +735,13 @@ function renderMarkedFraction(content: string, color: string): ReactNode {
   if (sepIdx === -1) return renderTextWithEmbeddedNumbers(content);
   const numeratorRaw = content.slice(0, sepIdx);
   const denominator = content.slice(sepIdx + 1);
-  const coefVarIdx = numeratorRaw.indexOf(COEF_VAR_SEPARATOR);
-  const coefficient = coefVarIdx === -1 ? numeratorRaw : numeratorRaw.slice(0, coefVarIdx);
-  const variable = coefVarIdx === -1 ? "" : numeratorRaw.slice(coefVarIdx + 1);
+  // "coefficient \u0006 variable", or "before \u0006 variable \u0006 after"
+  // when the canceled part sits on both sides of the variable (formulas:
+  // "mx" over "x" solving for m, "lwh" over "lh" solving for w).
+  const pieces = numeratorRaw.split(COEF_VAR_SEPARATOR);
+  const coefficient = pieces[0];
+  const variable = pieces[1] ?? "";
+  const afterPart = pieces[2] ?? "";
   return (
     <span
       style={{
@@ -504,13 +752,20 @@ function renderMarkedFraction(content: string, color: string): ReactNode {
       }}
     >
       <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: "1.2em", paddingBottom: "0.1em", lineHeight: 1.15 }}>
-        <XMark size="large">
-          <InlineMath math={coefficient} />
-        </XMark>
+        {coefficient ? (
+          <XMark size="large">
+            <InlineMath math={coefficient} />
+          </XMark>
+        ) : null}
         {variable.length > 0 ? (
-          <span style={{ marginLeft: 4 }}>
+          <span style={{ marginLeft: coefficient ? 4 : 0, marginRight: afterPart ? 4 : 0 }}>
             <InlineMath math={variable} />
           </span>
+        ) : null}
+        {afterPart ? (
+          <XMark size="large">
+            <InlineMath math={afterPart} />
+          </XMark>
         ) : null}
       </span>
       <span
@@ -714,14 +969,29 @@ function renderMarkedReciprocal(content: string, color: string): ReactNode {
 // version that follows).
 // Format: "STACKTOP:{0|1 bar shown}\u0005{numerator}\u0005{denominator}".
 const STACKTOP_PREFIX = "STACKTOP:";
+// Space kept under the numbers when a note line tucks up (see tuckSlots):
+// about what a plain line leaves under its numbers.
+const TUCK_KEEP = 6;
+// ...and when an answer on that line sits under the fractions above.
+const TUCK_KEEP_ANSWER = 14;
+// Room between an answer and the box drawn around it.
+const BOX_PAD_X = 6;
+const BOX_PAD_Y = 3;
 
 function renderStackTop(content: string, color: string): ReactNode {
   const [bar, num, den] = content.split(STACK_SEPARATOR);
   const shown = bar === "1";
   return (
     <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", verticalAlign: "middle" }}>
-      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: "1.2em", paddingBottom: "0.1em", lineHeight: 1.15 }}>
-        <InlineMath math={num} />
+      <span data-stack-num="" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: "1.2em", paddingBottom: "0.1em", lineHeight: 1.15 }}>
+        {num.startsWith(MARKEDTERM_PREFIX) ? (
+          // a crossed-out number on a line that's divided in place elsewhere
+          <XMark>
+            <InlineMath math={num.slice(MARKEDTERM_PREFIX.length)} />
+          </XMark>
+        ) : (
+          <InlineMath math={num} />
+        )}
       </span>
       <span style={{ borderTop: `0.06em solid ${color}`, alignSelf: "stretch", visibility: shown ? "visible" : "hidden" }} />
       <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: "1.2em", paddingTop: "0.1em", lineHeight: 1.15, visibility: shown ? "visible" : "hidden" }}>
@@ -736,12 +1006,20 @@ function renderStackTop(content: string, color: string): ReactNode {
 // so all fractions are the same height whatever is in them ("x" is shorter
 // than "3"). Fractions side by side in a line then have their bars at
 // exactly the same height.
+// A zero-width rule as tall and deep as "0", "f" and "%" (KaTeX: 0.75em
+// above the baseline, 0.194em below). A \vphantom would do the same, but its
+// invisible text sticks out past the numbers, and Safari counts that toward
+// the fraction's width - long bars and extra gaps.
+const FRACTION_STRUT = "\\rule[-0.1944em]{0pt}{0.9444em}";
+
 function strutFractions(tex: string): string {
   let out = "";
   let i = 0;
   while (i < tex.length) {
     if (tex.startsWith("\\dfrac{", i)) {
-      out += "\\dfrac{\\vphantom{0}";
+      // The strut goes AFTER the numbers: in front, it would turn a leading
+      // minus ("-6") into a subtraction sign with space around it.
+      out += "\\dfrac{";
       i += "\\dfrac{".length;
       // copy the numerator up to its closing brace, then strut the denominator
       let depth = 1;
@@ -753,10 +1031,19 @@ function strutFractions(tex: string): string {
         if (depth > 0) num += ch;
         i++;
       }
-      out += strutFractions(num) + "}";
+      out += strutFractions(num) + FRACTION_STRUT + "}";
       if (tex[i] === "{") {
-        out += "{\\vphantom{0}";
+        let dd = 1;
+        let den = "";
         i++;
+        while (i < tex.length && dd > 0) {
+          const ch = tex[i];
+          if (ch === "{") dd++;
+          else if (ch === "}") dd--;
+          if (dd > 0) den += ch;
+          i++;
+        }
+        out += "{" + strutFractions(den) + FRACTION_STRUT + "}";
       }
       continue;
     }
@@ -1669,6 +1956,10 @@ const MATH_EM = 20 * 1.21;
 const TEX_MED_SPACE = (MATH_EM * 4) / 18;
 const TEX_THICK_SPACE = (MATH_EM * 5) / 18;
 
+// A relation sign or "or"/"and" that isn't in the anchor column
+// (compound inequalities write these as \mkern1mu< or \;\text{or}\;).
+const CONNECTOR_RE = /^\\(mkern1mu|;)/;
+
 function isBlankCell(c: string | undefined): boolean {
   if (c === undefined) return true;
   const t = c.replace(/^(LEFTALIGN:|MARKEDTERM:)+/, "").trim();
@@ -1798,7 +2089,9 @@ function AnchoredEquation({
   distributeAnnotations,
   arcReserveSlots,
   crossLoops,
+  alignColumns,
 }: {
+  alignColumns?: boolean;
   rows: GridRow[];
   slotIds: string[];
   slotVersions: Record<string, GridRow[]>;
@@ -1828,7 +2121,7 @@ function AnchoredEquation({
     const measure = () => {
       const left = grid.getBoundingClientRect().left;
       let min = 0;
-      grid.querySelectorAll<HTMLElement>(".katex").forEach((el) => {
+      grid.querySelectorAll<HTMLElement>(".katex, [data-caption]").forEach((el) => {
         const r = el.getBoundingClientRect();
         if (r.width > 0) min = Math.min(min, r.left - left);
       });
@@ -1871,23 +2164,62 @@ function AnchoredEquation({
   // "3x/3 = 21/3") is drawn at the top of its space from the start, so
   // when the fraction bars and denominators appear they're simply added
   // underneath - the numbers and "=" stay exactly where they were.
+  const isConnector = (c: string | undefined) => !!c && CONNECTOR_RE.test(c);
   const isDivision = (c: string) => /^\\dfrac\{[^{}]*\}\{[^{}]*\}$/.test(c) || c.startsWith("MARKEDFRACTION:");
   const hasFraction = (c: string) => /\\dfrac|\\frac|MARKEDFRACTION:|MARKEDPARENFRACTION:|STACKEDFRACTION:|MARKEDRECIP:/.test(c);
+  // Each column (other than the anchor) is written out (or blank), then
+  // divided - and stays divided; columns that never divide stay plain. At
+  // least one column has to be divided in place for this to matter.
+  function compoundTopAligned(versions: GridRow[]): boolean {
+    let inPlace = false;
+    const width = versions[0]?.cells.length ?? 0;
+    for (let i = 0; i < width; i++) {
+      if (i === e) continue;
+      const vals = versions.map((r) => r.cells[i] ?? "");
+      const fi = vals.findIndex(isDivision);
+      const before = fi === -1 ? vals : vals.slice(0, fi);
+      // a column that's never divided can have a number crossed out (the
+      // other inequality's constant)
+      if (fi === -1) {
+        if (vals.some((c) => /^[A-Z]+:/.test(c) && !c.startsWith("MARKEDTERM:"))) return false;
+        continue;
+      }
+      if (before.some((c) => /^[A-Z]+:/.test(c))) return false;
+      if (!vals.slice(fi).every(isDivision)) return false;
+      if (before.some((c) => !isBlankCell(c))) inPlace = true;
+    }
+    return inPlace;
+  }
+
   const topAligned = new Set(
     slotOrderAll.filter((id) => {
       const versions = (slotVersions[id] ?? []).filter((r) => r.caption === undefined);
       // The line is written out (possibly a piece at a time) with no
       // fractions, then divided: the first fractioned version divides
       // every term of the last plain one, and nothing else.
+      // Compound inequalities divide one inequality at a time (the left one,
+      // later the right one), so their lines are checked column by column.
+      if (versions.some((r) => r.cells.some(isConnector))) return compoundTopAligned(versions);
       const firstFrac = versions.findIndex((r) => r.cells.some(hasFraction));
       if (firstFrac < 1) return false;
       const flat = versions[firstFrac - 1];
       if (versions.slice(0, firstFrac).some((r) => r.cells.some((c) => /^[A-Z]+:/.test(c)))) return false;
+      // Compound inequalities ("2x < 4 or 3x > 12"): the second symbol, the
+      // "or", and a part that needs no dividing stay as they are.
+      const compoundLine = flat.cells.some(isConnector);
       // Every later version is exactly that division (plain, or with the
       // canceled numbers crossed out).
       return versions
         .slice(firstFrac)
-        .every((d) => d.cells.every((c, i) => i === e || (isBlankCell(flat.cells[i]) ? isBlankCell(c) : isDivision(c))));
+        .every((d) =>
+          d.cells.every(
+            (c, i) =>
+              i === e ||
+              (isBlankCell(flat.cells[i])
+                ? isBlankCell(c)
+                : isDivision(c) || (compoundLine && c === flat.cells[i]))
+          )
+        );
     })
   );
 
@@ -1895,13 +2227,17 @@ function AnchoredEquation({
   // version can hold that space (invisibly) from the start.
   const futureDen: Record<string, Record<number, string>> = {};
   for (const id of topAligned) {
-    const d = (slotVersions[id] ?? []).find((r) => r.cells.some(hasFraction));
     futureDen[id] = {};
-    d?.cells.forEach((c, i) => {
-      const m = c.match(/^\\dfrac\{(.*)\}\{(.*)\}$/);
-      if (m) futureDen[id][i] = m[2];
-      else if (c.startsWith("MARKEDFRACTION:")) futureDen[id][i] = c.slice(c.indexOf("\u0005") + 1);
-    });
+    // each column's first division (all at once for most lines; one
+    // inequality at a time for compound inequalities)
+    for (const r of slotVersions[id] ?? []) {
+      r.cells.forEach((c, i) => {
+        if (i in futureDen[id]) return;
+        const m = c.match(/^\\dfrac\{(.*)\}\{(.*)\}$/);
+        if (m) futureDen[id][i] = m[2];
+        else if (c.startsWith("MARKEDFRACTION:")) futureDen[id][i] = c.slice(c.indexOf("\u0005") + 1);
+      });
+    }
   }
   const SEP = "\u0005";
   function topify(c: string, slotId: string | undefined, col: number): string {
@@ -1923,13 +2259,105 @@ function AnchoredEquation({
   const isAnnotationSlot = (id: string) =>
     (slotVersions[id] ?? []).every((r) => r.caption === undefined && (r.cells[e] ?? "") === "");
 
+  // A note line ("+4   +4") under a line that keeps room for denominators
+  // in OTHER columns (compound inequalities: the other inequality is
+  // divided in place on that line) tucks up under its own numbers, instead
+  // of sitting below that empty room. Measured once from the layout, the
+  // same on every step - so nothing moves.
+  const tuckSlots = slotOrderAll.filter((id, i) => {
+    if (i === 0 || !isAnnotationSlot(id)) return false;
+    const above = slotOrderAll[i - 1];
+    if (!topAligned.has(above)) return false;
+    const divCols = new Set(Object.keys(futureDen[above] ?? {}).map(Number));
+    if (divCols.size === 0) return false;
+    if ((slotVersions[id] ?? []).some((r) => r.tuckPastFractions)) return true;
+    return !(slotVersions[id] ?? []).some((r) => r.cells.some((c, ci) => divCols.has(ci) && !isBlankCell(c)));
+  });
+  const [tuck, setTuck] = useState<Record<string, number>>({});
+  const [lift, setLift] = useState<Record<string, number>>({});
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const next: Record<string, number> = {};
+    for (const id of tuckSlots) {
+      const above = slotOrderAll[slotOrderAll.indexOf(id) - 1];
+      const lines = Array.from(grid.querySelectorAll<HTMLElement>(`[data-line="${CSS.escape(above)}"]`));
+      const nums = lines.flatMap((el) => Array.from(el.querySelectorAll<HTMLElement>("[data-stack-num]")));
+      if (!lines.length || !nums.length) continue;
+      const bottom = Math.max(...lines.map((el) => el.getBoundingClientRect().bottom));
+      const numBottom = Math.max(...nums.map((el) => el.getBoundingClientRect().bottom));
+      // (an answer under the fractions keeps enough room to clear them)
+      const keep = (slotVersions[id] ?? []).some((r) => r.tuckPastFractions) ? TUCK_KEEP_ANSWER : TUCK_KEEP;
+      const room = bottom - numBottom - keep;
+      if (room > 0) next[id] = Math.round(room);
+    }
+    const same = Object.keys(next).length === Object.keys(tuck).length && Object.entries(next).every(([k, v]) => tuck[k] === v);
+    if (!same) setTuck(next);
+    // A notes line that can't tuck up as a whole (an answer on it has to
+    // stay under the fractions above) lifts just its marked notes.
+    const nextLift: Record<string, number> = {};
+    slotOrderAll.forEach((id, i) => {
+      if (i === 0 || tuckSlots.includes(id) || !isAnnotationSlot(id)) return;
+      if (!(slotVersions[id] ?? []).some((r) => r.liftCols?.length)) return;
+      const above = slotOrderAll[i - 1];
+      if (!topAligned.has(above)) return;
+      const lines = Array.from(grid.querySelectorAll<HTMLElement>(`[data-line="${CSS.escape(above)}"]`));
+      const nums = lines.flatMap((el) => Array.from(el.querySelectorAll<HTMLElement>("[data-stack-num]")));
+      if (!lines.length || !nums.length) return;
+      const bottom = Math.max(...lines.map((el) => el.getBoundingClientRect().bottom));
+      const numBottom = Math.max(...nums.map((el) => el.getBoundingClientRect().bottom));
+      const room = bottom - numBottom - TUCK_KEEP;
+      if (room > 0) nextLift[id] = Math.round(room);
+    });
+    const sameLift = Object.keys(nextLift).length === Object.keys(lift).length && Object.entries(nextLift).every(([k, v]) => lift[k] === v);
+    if (!sameLift) setLift(nextLift);
+  });
+
+  // Answers drawn in a box (GridRow.boxCols): a black outline around the
+  // answer's cells, measured from the page and drawn on top - it never
+  // takes up space, so nothing around it moves.
+  const hasBoxes = slotOrderAll.some((id) => (slotVersions[id] ?? []).some((r) => r.boxCols?.length));
+  const [boxes, setBoxes] = useState<{ left: number; top: number; width: number; height: number }[]>([]);
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const g = grid.getBoundingClientRect();
+    const next: { left: number; top: number; width: number; height: number }[] = [];
+    rows.forEach((r, i) => {
+      const slot = slotOrderAll[i];
+      if (!r.boxCols?.length || !slot) return;
+      const cellEls = Array.from(grid.querySelectorAll<HTMLElement>(`[data-row-slot="${CSS.escape(slot)}"][data-col]`));
+      for (const group of r.boxCols) {
+        const rects = cellEls
+          .filter((el) => group.includes(Number(el.getAttribute("data-col"))))
+          // every visible piece of the math - letters, numbers, signs and
+          // fraction bars - so a fraction is measured top to bottom the same
+          // way in every browser (Safari sizes KaTeX's containers differently)
+          .flatMap((el) => Array.from(el.querySelectorAll<HTMLElement>(".katex-html .mord, .katex-html .mbin, .katex-html .mrel, .katex-html .mopen, .katex-html .mclose, .katex-html .mpunct, .katex-html .frac-line")))
+          .filter((el) => !el.closest(".pstrut, .strut"))
+          .filter((el) => getComputedStyle(el).visibility !== "hidden")
+          .map((el) => el.getBoundingClientRect())
+          .filter((b) => b.width > 0);
+        if (!rects.length) continue;
+        const left = Math.min(...rects.map((b) => b.left)) - g.left - BOX_PAD_X;
+        const right = Math.max(...rects.map((b) => b.right)) - g.left + BOX_PAD_X;
+        const top = Math.min(...rects.map((b) => b.top)) - g.top - BOX_PAD_Y;
+        const bottom = Math.max(...rects.map((b) => b.bottom)) - g.top + BOX_PAD_Y;
+        next.push({ left: Math.round(left), top: Math.round(top), width: Math.round(right - left), height: Math.round(bottom - top) });
+      }
+    });
+    if (JSON.stringify(next) !== JSON.stringify(boxes)) setBoxes(next);
+  });
+
   // Group = a line plus the annotation lines directly under it; they share
   // one set of column positions.
   const groupOf: Record<string, string> = {};
   const groupSlots: Record<string, string[]> = {};
   let anchor = slotOrderAll[0];
   for (const id of slotOrderAll) {
-    if (!isAnnotationSlot(id)) anchor = id;
+    // alignColumns: every line shares one set of columns (compound
+    // inequalities - each inequality sign stays in the same spot).
+    if (!isAnnotationSlot(id) && !alignColumns) anchor = id;
     groupOf[id] = anchor;
     (groupSlots[anchor] ??= []).push(id);
   }
@@ -1945,6 +2373,14 @@ function AnchoredEquation({
       if (versions.some((r) => !isBlankCell(r.cells[c]))) cols.push(c);
     }
     return cols;
+  }
+
+  // A term that starts its own expression shows its natural sign ("-2x",
+  // not "- 2x"): the first term on its side, or the first term after a
+  // second inequality sign or "and"/"or" (compound inequalities).
+  function startsTerm(cells: readonly string[], c: number, cols: number[]): boolean {
+    const prev = cols.filter((cc) => cc < c && !isBlankCell(cells[cc])).pop();
+    return prev === undefined || isConnector(cells[prev]);
   }
 
   function SideBlock({
@@ -1972,6 +2408,18 @@ function AnchoredEquation({
       .flatMap((id) => slotVersions[id] ?? [])
       .filter((r) => r.caption === undefined);
     const isAnnotation = !!slotId && isAnnotationSlot(slotId);
+    // Lined-up columns (compound inequalities): on the right side, a term
+    // in the column just before an inequality sign hugs that sign.
+    const connectorCol = (col: number | undefined) => col !== undefined && versions.some((v) => isConnector(v.cells[col]));
+    const alignFor = (c: number, width = 1): "left" | "right" => {
+      if (!alignColumns) return align;
+      const at = cols.indexOf(c);
+      if (connectorCol(cols[at + width])) return "right"; // a sign right after it
+      if (connectorCol(cols[at - 1])) return "left"; // a sign right before it
+      return align;
+    };
+    // a cell that also takes up the next column (see GridRow.spanNext)
+    const spans = (r: GridRow, c: number) => !!r.spanNext?.includes(c) && cols[cols.indexOf(c) + 1] === c + 1;
     const color = row ? colorFor(row.highlight) : "var(--ink)";
     const annotations = row && slotId ? distributeAnnotations.filter((a) => a.targetSlotId === slotId) : [];
     const reserve = !!slotId && arcReserveSlots.has(slotId);
@@ -1991,23 +2439,49 @@ function AnchoredEquation({
           display: "inline-grid",
           gridTemplateColumns: cols.length ? `repeat(${cols.length}, auto)` : "0px",
           columnGap: TEX_MED_SPACE,
-          alignItems: "center",
+          alignItems: row?.baseline ? "baseline" : "center",
         }}
       >
         {versions.flatMap((v, vi) =>
-          cols.map((c, i) => (
+          cols.map((c, i) => (i > 0 && spans(v, cols[i - 1]) ? null : v.noWidthCols?.includes(c) ? (
+            // drawn without widening its column: a zero-width copy, placed
+            // the way the real one will be - so the room it reaches past the
+            // left edge is held from the first step
             <div
               key={`p-${vi}-${c}`}
               aria-hidden="true"
+              style={{
+                gridRow: 1,
+                gridColumn: spans(v, c) ? `${i + 1} / span 2` : i + 1,
+                height: 0,
+                width: 0,
+                // clipped (it's invisible anyway): a clipped box never sets
+                // the line's baseline, but its position is still measured
+                overflow: "hidden",
+                visibility: "hidden",
+                whiteSpace: "nowrap",
+                ...(alignFor(c, spans(v, c) ? 2 : 1) === "right" ? { justifySelf: "end", display: "flex", justifyContent: "flex-end" } : { justifySelf: "start" }),
+              }}
+            >
+              <Cell math={startsTerm(v.cells, c, cols) ? naturalSign(texSpacing(v.cells[c] ?? "")) : spaceJoiningSign(texSpacing(v.cells[c] ?? ""))} color="var(--ink)" align={align} />
+            </div>
+          ) : (
+            <div
+              key={`p-${vi}-${c}`}
+              aria-hidden="true"
+              // A cell that spans into the next column is measured in its own
+              // column only: all of its width goes to the term's column, so
+              // the next column (a "+ 1") stays tight and a lone "x" above
+              // or below still sits right against it.
               style={{ gridRow: 1, gridColumn: i + 1, height: 0, overflow: "hidden", visibility: "hidden", whiteSpace: "nowrap" }}
             >
               <Cell
-                math={c === cols.find((cc) => !isBlankCell(v.cells[cc])) ? naturalSign(texSpacing(v.cells[c] ?? "")) : spaceJoiningSign(texSpacing(v.cells[c] ?? ""))}
+                math={startsTerm(v.cells, c, cols) ? naturalSign(texSpacing(v.cells[c] ?? "")) : spaceJoiningSign(texSpacing(v.cells[c] ?? ""))}
                 color="var(--ink)"
                 align={align}
               />
             </div>
-          ))
+          )))
         )}
         {/* Height reservation: every version this line will ever take
             (e.g. "8x = -48" later becoming a stacked fraction), invisible
@@ -2059,30 +2533,88 @@ function AnchoredEquation({
               // Lined up with the right edge of the term it sits under, and
               // allowed to extend past it (zero-width anchor, content
               // overflowing to the left) - so it never widens the column.
+              // In lined-up columns where the term sits at the left of its
+              // column (a number just after a sign), the note starts where
+              // that number starts instead.
+              const fromLeft = alignColumns && alignFor(c) === "left";
+              const liftOf = (col: number) => (slotId && lift[slotId] && row.liftCols?.includes(col) ? `translateY(${-lift[slotId]}px)` : undefined);
+              // ...and ends where that number ends: an invisible copy of the
+              // number above sets the width, and the note hangs from its
+              // right edge.
+              const above = slotId ? slotOrderAll[slotOrderAll.indexOf(slotId) - 1] : undefined;
+              const aboveCell = above ? (slotVersions[above] ?? []).map((v) => v.cells[c] ?? "").filter((t) => !isBlankCell(t)).pop() : undefined;
+              // (an answer written on a note line - "x < 4" - starts right
+              // after its sign instead)
+              const afterSign = i > 0 && isConnector(row.cells[cols[i - 1]]);
+              const ref = fromLeft && !afterSign && aboveCell && !/^[A-Z]+:/.test(aboveCell) ? aboveCell : undefined;
+              if (ref) {
+                return (
+                  <div key={c} data-row-slot={dataSlot} data-col={c} style={{ gridRow: 1, gridColumn: i + 1, justifySelf: "start", width: 0, overflow: "visible", paddingTop: padTop || undefined, transform: liftOf(c) }}>
+                    {/* zero-width, so the number above (which may itself be drawn
+                        without widening its column) never widens this line */}
+                    <div style={{ position: "relative", width: "fit-content" }}>
+                      <div aria-hidden="true" style={{ height: 0, overflow: "hidden", visibility: "hidden", whiteSpace: "nowrap" }}>
+                        <Cell math={texSpacing(ref)} color="var(--ink)" align="left" />
+                      </div>
+                      <div aria-hidden="true" style={{ width: 0, overflow: "hidden", visibility: "hidden", whiteSpace: "nowrap" }}>
+                        <Cell math={tightSign(texSpacing(row.cells[c] ?? ""))} color={row.successCols?.includes(c) ? "var(--green)" : color} align="right" />
+                      </div>
+                      <div style={{ position: "absolute", right: 0, top: 0, whiteSpace: "nowrap" }}>
+                        <Cell math={tightSign(texSpacing(row.cells[c] ?? ""))} color={row.successCols?.includes(c) ? "var(--green)" : color} align="right" />
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
               return (
                 <div
                   key={c}
                   data-row-slot={dataSlot}
+                  data-col={c}
                   style={{
                     gridRow: 1,
                     gridColumn: i + 1,
-                    justifySelf: "end",
+                    justifySelf: fromLeft ? "start" : "end",
+                    transform: liftOf(c),
                     width: 0,
                     display: "flex",
-                    justifyContent: "flex-end",
+                    justifyContent: fromLeft ? "flex-start" : "flex-end",
                     overflow: "visible",
                     paddingTop: padTop || undefined,
                   }}
                 >
-                  <Cell math={tightSign(texSpacing(row.cells[c] ?? ""))} color={color} align="right" />
+                  <Cell math={tightSign(texSpacing(row.cells[c] ?? ""))} color={row.successCols?.includes(c) ? "var(--green)" : color} align="right" />
                 </div>
               );
             }
-            const firstOnSide = cols.find((cc) => !isBlankCell(row.cells[cc]));
+            if (i > 0 && spans(row, cols[i - 1])) return null;
+            const wide = spans(row, c);
             const text = texSpacing(row.cells[c] ?? "");
             return (
-              <div key={c} data-row-slot={dataSlot} style={{ gridRow: 1, gridColumn: i + 1, paddingTop: padTop || undefined }}>
-                <Cell math={topify(c === firstOnSide ? naturalSign(text) : spaceJoiningSign(text), slotId, c)} color={color} align={align} />
+              <div
+                key={c}
+                data-row-slot={dataSlot}
+                data-col={c}
+                style={{
+                  gridRow: 1,
+                  gridColumn: wide ? `${i + 1} / span 2` : i + 1,
+                  paddingTop: padTop || undefined,
+                  // drawn without widening its column (GridRow.noWidthCols): a
+                  // number after a sign extends to the right; a term before
+                  // one ends where its column(s) end and extends to the left
+                  ...(row.noWidthCols?.includes(c)
+                    ? alignFor(c, wide ? 2 : 1) === "right"
+                      ? { width: 0, overflow: "visible", justifySelf: "end", display: "flex", justifyContent: "flex-end", whiteSpace: "nowrap" as const }
+                      : { width: 0, overflow: "visible", justifySelf: "start", whiteSpace: "nowrap" as const }
+                    : {}),
+                }}
+              >
+                <Cell
+                  math={topify(startsTerm(row.cells, c, cols) ? naturalSign(text) : spaceJoiningSign(text), slotId, c)}
+                  // a second inequality sign, or "or"/"and": same color as the anchor sign
+                  color={isConnector(row.cells[c]) ? "var(--ink-soft)" : row.successCols?.includes(c) ? "var(--green)" : color}
+                  align={alignFor(c, wide ? 2 : 1)}
+                />
               </div>
             );
           })}
@@ -2093,7 +2625,17 @@ function AnchoredEquation({
   const groups = Array.from(new Set(slotOrderAll.map((id) => groupOf[id])));
 
   return (
-    <div style={{ overflowX: "auto", width: "100%", paddingTop: 14, paddingBottom: 4, paddingLeft: Math.max(crossLoops ? 18 : 0, overhang) || undefined }}>
+    <div
+      style={{
+        overflowX: "auto",
+        width: "100%",
+        paddingTop: 14,
+        // room for an answer's box at the bottom and at either side (the same from the first step)
+        paddingBottom: hasBoxes ? BOX_PAD_Y + 8 : 4,
+        paddingLeft: Math.max(crossLoops ? 18 : 0, hasBoxes ? BOX_PAD_X + 4 + overhang : overhang) || undefined,
+        paddingRight: hasBoxes ? BOX_PAD_X + 4 : undefined,
+      }}
+    >
       <div
         ref={gridRef}
         style={{
@@ -2107,6 +2649,13 @@ function AnchoredEquation({
           fontSize: 20,
         }}
       >
+        {boxes.map((b, bi) => (
+          <div
+            key={`box-${bi}`}
+            aria-hidden="true"
+            style={{ position: "absolute", left: b.left, top: b.top, width: b.width, height: b.height, border: "1.5px solid var(--ink)", borderRadius: 4, pointerEvents: "none" }}
+          />
+        ))}
         {/* Probe: one invisible copy of each group's two sides, so the
             space on each side of "=" is the widest it will ever be. */}
         {groups.map((g) => (
@@ -2155,7 +2704,7 @@ function AnchoredEquation({
                   padding: "4px 0",
                 }}
               >
-                <span>{row.caption}</span>
+                <span data-caption="">{row.caption}</span>
               </div>
             );
           }
@@ -2163,16 +2712,33 @@ function AnchoredEquation({
           const reserve = arcReserveSlots.has(slotId) || distributeAnnotations.some((a) => a.targetSlotId === slotId && a.arcsShown > 0);
           const eqSym = row.cells[e] ?? "";
           return [
-            <div key={`${slotId}-l`} aria-hidden={hidden || undefined} style={{ ...hide, gridRow, gridColumn: 1, justifySelf: "end", marginBottom: mb, paddingRight: loopGap(slotId) }}>
+            <div key={`${slotId}-l`} data-line={slotId} aria-hidden={hidden || undefined} style={{ ...hide, gridRow, gridColumn: 1, justifySelf: "end", marginBottom: mb, marginTop: tuck[slotId] ? -tuck[slotId] : undefined, paddingRight: loopGap(slotId) }}>
               <SideBlock group={group} side="left" row={row} slotId={slotId} hidden={hidden} />
             </div>,
             <div
               key={`${slotId}-eq`}
               data-row-slot={hidden ? undefined : slotId}
+              data-col={e}
               aria-hidden={hidden || undefined}
-              style={{ ...hide, gridRow, gridColumn: 2, textAlign: "center", color: "var(--ink-soft)", whiteSpace: "nowrap", paddingTop: reserve ? 34 : undefined, marginBottom: mb }}
+              data-line={slotId}
+              style={{ ...hide, gridRow, gridColumn: 2, textAlign: "center", color: "var(--ink-soft)", whiteSpace: "nowrap", paddingTop: reserve ? 34 : undefined, marginBottom: mb, marginTop: tuck[slotId] ? -tuck[slotId] : undefined }}
             >
-              {eqSym
+              {eqSym.startsWith("SPILL:")
+                ? (() => {
+                    // A sign and number written from the start of the anchor
+                    // column without widening it (compound inequalities: the
+                    // "≤ 7" of the problem as given, above the "and").
+                    const [sym, rest] = eqSym.slice("SPILL:".length).split("\u0005");
+                    return (
+                      <div style={{ width: 0, overflow: "visible", whiteSpace: "nowrap", textAlign: "left" }}>
+                        <InlineMath math={sym} />
+                        <span style={{ marginLeft: TEX_THICK_SPACE, color: colorFor(row.highlight) }}>
+                          <InlineMath math={rest} />
+                        </span>
+                      </div>
+                    );
+                  })()
+                : eqSym
                 ? topAligned.has(slotId)
                   ? (
                     // Same line height as the cells beside it, so the stacks
@@ -2186,7 +2752,7 @@ function AnchoredEquation({
                   : <InlineMath math={eqSym} />
                 : null}
             </div>,
-            <div key={`${slotId}-r`} aria-hidden={hidden || undefined} style={{ ...hide, gridRow, gridColumn: 3, justifySelf: "start", marginBottom: mb, paddingLeft: loopGap(slotId) }}>
+            <div key={`${slotId}-r`} data-line={slotId} aria-hidden={hidden || undefined} style={{ ...hide, gridRow, gridColumn: 3, justifySelf: "start", marginBottom: mb, marginTop: tuck[slotId] ? -tuck[slotId] : undefined, paddingLeft: loopGap(slotId) }}>
               <SideBlock group={group} side="right" row={row} slotId={slotId} hidden={hidden} />
             </div>,
           ];
@@ -2297,6 +2863,14 @@ export default function StepSolver({
         shown: crossLoopsIdx !== -1 && (stepIndex > crossLoopsIdx || (stepIndex === crossLoopsIdx && revealed)),
       }
     : undefined;
+
+  // A list beside the work (factor pairs): the newest one whose step has
+  // been answered. Its room is held from the first step.
+  const sideListAll = instance.steps.find((st) => st.sideList)?.sideList;
+  let sideListShown: SideList | undefined;
+  instance.steps.forEach((st, i) => {
+    if (st.sideList && (stepIndex > i || (stepIndex === i && revealed))) sideListShown = st.sideList;
+  });
 
   // A step whose correct answer is a number line (inequalities): once it's
   // answered, that graph is drawn under the solution too.
@@ -2560,6 +3134,11 @@ export default function StepSolver({
         >
           {skillName}
         </div>
+        {instance.problemText && (
+          <div style={{ fontSize: 18, fontWeight: 600, color: "var(--ink)", fontFamily: "var(--font-body)" }}>
+            <MixedText content={instance.problemText} />
+          </div>
+        )}
         {isSystem ? (
         <EquationGrid
           rows={visibleRows}
@@ -2576,6 +3155,8 @@ export default function StepSolver({
           pairedLayout={instance.pairedLayout}
         />
         ) : (
+          <div style={sideListAll ? { display: "flex", alignItems: "flex-start", gap: 28, maxWidth: "100%" } : undefined}>
+          <div style={sideListAll ? { minWidth: 0, flex: "0 1 auto", width: "fit-content" } : undefined}>
           <AnchoredEquation
             rows={visibleRows as GridRow[]}
             slotIds={slotOrder}
@@ -2585,7 +3166,11 @@ export default function StepSolver({
             distributeAnnotations={distributeAnnotations}
             arcReserveSlots={new Set([...arcReserveKeys].filter((k) => k.endsWith("|")).map((k) => k.slice(0, -1)))}
             crossLoops={crossLoopsState}
+            alignColumns={instance.alignColumns}
           />
+          </div>
+          {sideListAll && <SideListPanel list={sideListShown ?? sideListAll} shown={!!sideListShown} />}
+          </div>
         )}
         {/* The finished number line, under the work. Its room is held from
             the first step (invisible until the graph question is answered),
@@ -2595,7 +3180,7 @@ export default function StepSolver({
             aria-hidden={!answerGraphShown}
             style={{ visibility: answerGraphShown ? "visible" : "hidden", maxWidth: 340, marginTop: 4 }}
           >
-            <NumberLineGraph {...parseGraphChoice(answerGraph)} markerId="answer-graph" color="var(--green)" align="left" />
+            <GraphFromText text={answerGraph} markerId="answer-graph" color="var(--green)" align="left" />
           </div>
         )}
         {isSystem ? (
@@ -2689,7 +3274,7 @@ export default function StepSolver({
                       }}
                     >
                       {isGraph ? (
-                        <NumberLineGraph {...parseGraphChoice(choice.text)} markerId={`probe-graph-${si}-${ci}`} />
+                        <GraphFromText text={choice.text} markerId={`probe-graph-${si}-${ci}`} />
                       ) : (
                         <MixedText content={choice.text} />
                       )}
@@ -2697,8 +3282,15 @@ export default function StepSolver({
                   );
                 })}
               </div>
-              <div style={{ marginTop: 10, padding: "9px 20px", fontSize: 14, fontWeight: 700, border: "1.5px solid transparent" }}>
-                Next step →
+              {/* The widest the button row ever gets (on the last step), so the
+                  panel never widens - and number lines never grow - at the end. */}
+              <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                <div style={{ padding: "9px 20px", fontSize: 14, fontWeight: 700, border: "1.5px solid transparent", whiteSpace: "nowrap" }}>
+                  ← Previous step
+                </div>
+                <div style={{ padding: "9px 20px", fontSize: 14, fontWeight: 700, border: "1.5px solid transparent", whiteSpace: "nowrap" }}>
+                  {finalButtonLabel}
+                </div>
               </div>
             </div>
           ))}
@@ -2779,7 +3371,7 @@ export default function StepSolver({
                     }}
                   >
                     {isGraph ? (
-                      <NumberLineGraph {...parseGraphChoice(choice.text)} markerId={`graph-arrow-${i}`} />
+                      <GraphFromText text={choice.text} markerId={`graph-arrow-${i}`} />
                     ) : (
                       <MixedText content={choice.text} />
                     )}

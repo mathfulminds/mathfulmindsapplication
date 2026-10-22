@@ -13,8 +13,7 @@ import {
   renderDivideTerm,
   renderMultiplyTerm,
   shuffle,
-  signedWord,
-} from "./isolateVariableCore";
+  signedWord, divNumerator } from "./isolateVariableCore";
 import {
   ComparisonSymbol,
   flipSymbol,
@@ -275,7 +274,7 @@ export function buildSolverInstance(
     // plain setup; confirmCoefficientOne adds the marked version to
     // this SAME "simplified" line once "coefficient / coefficient = 1"
     // is actually confirmed, not before.
-    const divSetupUnmarked = `\\dfrac{${renderMultiplyTerm(a, variableSymbol)}}{${a}}`;
+    const divSetupUnmarked = `\\dfrac{${divNumerator(a, variableSymbol)}}{${a}}`;
     const divSetupMarked = `MARKEDFRACTION:${a}\u0006${variableSymbol}\u0005${a}`;
     const divRhs = `\\dfrac{${newRhs}}{${a}}`;
     const setupExpr1 = bIsSecond ? divSetupUnmarked : BLANK;

@@ -46,6 +46,30 @@ export interface GridRow {
   // splitting across columns, so it never forces those columns wider for
   // every other row sharing the same grid.
   caption?: string;
+  // Optional: these columns' cells also take up the next column (lined-up
+  // layouts only - a compound inequality's variable term, once its constant
+  // is gone, can sit right against its sign without widening anything).
+  spanNext?: number[];
+  // Cells shown in the answer color even though the line isn't highlighted
+  // (compound inequalities: one inequality's answer on a line where the
+  // other is still being worked).
+  successCols?: number[];
+  // Groups of cells drawn inside a box (each group one box): an answer.
+  boxCols?: number[][];
+  // Note cells drawn higher, right under their own numbers, on a notes line
+  // that has to sit lower for something else on it (see compound inequalities).
+  liftCols?: number[];
+  // Cells drawn without widening their column (they extend to the right
+  // into empty space instead) - the lines before an absolute value or a
+  // square splits in two, so the split line's "and"/"or" stays close.
+  noWidthCols?: number[];
+  // The line's pieces line up on their baseline instead of being centered
+  // (a line with a square root: the "=" stays level with the math).
+  baseline?: boolean;
+  // A notes line that tucks up under the line above even though something on
+  // it sits under that line's fractions (an answer) - it keeps a little more
+  // room so that answer clears them.
+  tuckPastFractions?: boolean;
 }
 
 // Two equations shown together (used by systems-of-equations skills
@@ -89,6 +113,16 @@ export interface SolverStep {
   // how many arcs to show from which step is current and whether it's
   // been revealed. Left undefined for every other kind of step.
   distributeVisual?: DistributeVisual;
+  // Optional: a short list shown to the right of the work from this step on
+  // (once it's answered) - the factor pairs of c when factoring a
+  // quadratic. A later step can repeat it with one item marked (boxed).
+  sideList?: SideList;
+}
+
+export interface SideList {
+  title: string; // plain text, e.g. "Factor pairs of 12"
+  items: string[]; // KaTeX, e.g. "1 \\cdot 12"
+  marked?: number; // index of the item shown boxed in the answer color
 }
 
 export interface DistributeVisual {
@@ -224,4 +258,11 @@ export interface SolverInstance {
   // two sides are each one fraction (top-left with bottom-right, and
   // bottom-left with top-right) - the "cross multiply" picture.
   crossLoops?: { slotId: string; afterStepId: string };
+  // Optional: a word problem shown above the work for the whole problem
+  // (e.g. "What is 25% of 40?").
+  problemText?: string;
+  // Optional: every line shares one set of columns, so a symbol in the
+  // middle of a line (like a compound inequality's second sign) stays in the
+  // same spot on every line. Lines usually size their own columns.
+  alignColumns?: boolean;
 }

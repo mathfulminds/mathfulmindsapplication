@@ -12,8 +12,7 @@ import {
   renderDivideTerm,
   renderMultiplyTerm,
   shuffle,
-  signedWord,
-} from "./isolateVariableCore";
+  signedWord, divNumerator } from "./isolateVariableCore";
 
 function dedupNumeric(
   correctText: string,
@@ -144,7 +143,7 @@ export function buildSolverInstance(
     // coefficient - which IS the very first step, with the permanent
     // initial row still on screen above it - there's nothing here that
     // needs a phantom-numerator trick to avoid.
-    const divSetup = `\\dfrac{${renderMultiplyTerm(a, variableSymbol)}}{${a}}`;
+    const divSetup = `\\dfrac{${divNumerator(a, variableSymbol)}}{${a}}`;
     const divRhs = `\\dfrac{${newRhs}}{${a}}`;
     const setupExpr1 = bIsSecond ? divSetup : BLANK;
     const setupExpr2 = bIsSecond ? BLANK : divSetup;

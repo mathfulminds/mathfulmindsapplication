@@ -32,6 +32,16 @@ import { buildSolverInstance as buildMultiWithParen } from "@/lib/skills/multiSt
 import type { SideSpec } from "@/lib/skills/multiStepEquationsCore";
 import { buildProportionInstance } from "@/lib/skills/proportions";
 import { buildDistributeNegativeInstance } from "@/lib/skills/distributeNegative";
+import { buildDecimalPercentInstance } from "@/lib/skills/decimalPercent";
+import { buildBothSidesInequalityInstance } from "@/lib/skills/variablesBothSidesInequalities";
+import { buildCompoundInequalityInstance, solveCompound, twoPartSpecial } from "@/lib/skills/compoundInequalities";
+import { buildLiteralInstance, solvableLetters } from "@/lib/skills/literalEquations";
+import { buildPowerInstance } from "@/lib/skills/squareCubeRoots";
+import { buildAbsInstance } from "@/lib/skills/absoluteValue";
+import { buildAbsIneqInstance, absIneqAfter } from "@/lib/skills/absoluteValueInequalities";
+import { buildSqInstance, sqValue } from "@/lib/skills/quadraticsSquareRoots";
+import { buildFactorInstance, factorNumbers } from "@/lib/skills/quadraticsFactoring";
+import type { CompoundInequality, InequalityPart } from "@/lib/skills/compoundInequalities";
 import { buildOneStepRationalInstance } from "@/lib/skills/oneStepRational";
 import type { RationalMode } from "@/lib/skills/oneStepRational";
 import { buildEliminationSolverInstance } from "@/lib/skills/systemsElimination";
@@ -69,6 +79,15 @@ export const SKILLS = {
   nonIntEq: { id: "nonIntEq", name: "Fraction / decimal solutions", href: "/solve/non-integer-solutions" },
   nonIntIneq: { id: "nonIntIneq", name: "Fraction / decimal solutions (inequalities)", href: "/solve/non-integer-inequalities" },
   oneStepRational: { id: "oneStepRational", name: "One-step equations with fractions & decimals", href: "/solve/one-step-fractions-decimals" },
+  absEq: { id: "absEq", name: "Absolute value equations", href: "/solve/absolute-value-equations" },
+  absIneq: { id: "absIneq", name: "Absolute value inequalities", href: "/solve/absolute-value-inequalities" },
+  quadSqrt: { id: "quadSqrt", name: "Quadratics by square roots", href: "/solve/quadratics-square-roots" },
+  quadFactor: { id: "quadFactor", name: "Quadratics by factoring", href: "/solve/quadratics-factoring" },
+  roots: { id: "roots", name: "Square & cube roots", href: "/solve/square-and-cube-roots" },
+  literal: { id: "literal", name: "Literal equations", href: "/solve/literal-equations" },
+  compoundIneq: { id: "compoundIneq", name: "Compound inequalities", href: "/solve/compound-inequalities" },
+  bothSidesIneq: { id: "bothSidesIneq", name: "Inequalities with variables on both sides", href: "/solve/variables-both-sides-inequalities" },
+  decPct: { id: "decPct", name: "Decimal & percent equations", href: "/solve/decimal-percent-equations" },
   distNeg: { id: "distNeg", name: "Distributing a negative", href: "/solve/distributing-a-negative" },
   proportion: { id: "proportion", name: "Proportions", href: "/solve/proportions" },
   parenEq: { id: "parenEq", name: "Equations with parentheses", href: "/solve/parentheses-equations" },
@@ -229,7 +248,7 @@ function routeSingle(eq: ParsedEquation): Built {
   if (!isZero(A) && isZero(eq.linear.constant)) fail(ZERO_ANSWER);
 
   if (leftHasVar && rightHasVar) {
-    if (isIneq) fail("Inequalities with the variable on both sides aren't supported yet.");
+    if (isIneq) return routeBothSidesInequality(eq, v);
     return routeBothSides(eq, v);
   }
 
@@ -363,6 +382,18 @@ function routeSingle(eq: ParsedEquation): Built {
         ? { skill: SKILLS.nonIntIneq, instance: buildNonIntIneq({ ...inst, boundary: solution, origSymbol: symbol! }, v) }
         : { skill: SKILLS.nonIntEq, instance: buildNonIntEq({ ...inst, solution }, v) };
     }
+    // Decimals throughout (0.4x + 1.5 = 3.1): the decimal & percent skill.
+    const anyFractionStyle = [term, constTerm, C[0]].some(
+      (t) => (t.kind === "const" && t.style === "fraction") || (t.kind === "var" && (t.form !== "multiply" || t.coefStyle === "fraction"))
+    );
+    if (!isIneq && !anyFractionStyle && [a, b, c, solution].every(decimalOK) && !isZero(b)) {
+      return {
+        skill: SKILLS.decPct,
+        instance: buildDecimalPercentInstance({ kind: "twoStep", a, b, c, variableFirst, orientation }, v),
+      };
+    }
+    if (isIneq) fail("Inequalities with decimal coefficients (like 0.4x + 1.5 < 3.1) aren't supported yet.");
+    if (!anyFractionStyle && !decimalOK(solution)) fail("The answer to this one is a repeating decimal, which isn't supported yet.");
     fail("Decimal coefficients are only supported when they end in .5 (like 2.5x) and the answer is a whole number.");
   }
 
@@ -516,6 +547,111 @@ function routeMultiStepNoParen(eq: ParsedEquation, v: string): Built {
         leftSide: toSide(eq.left, aLeft, bLeft),
         rightSide: toSide(eq.right, aRight, bRight),
       },
+      v
+    ),
+  };
+}
+
+
+// ---------- compound inequalities ----------
+
+// "ax + b" (or "ax", "x + b") with whole numbers, variable term first.
+function middleParts(side: SurfaceTerm[], what: string): { a: number; b: number } {
+  const ok =
+    side.length >= 1 &&
+    side.length <= 2 &&
+    isVar(side[0]) &&
+    (side.length === 1 || isConst(side[1])) &&
+    side.every(isPlainInt);
+  if (!ok) fail(`Compound inequalities are supported when ${what} looks like ax + b with whole numbers, like 2x + 1.`);
+  const a = val((side[0] as VarTerm).coef);
+  const b = side.length === 2 ? val((side[1] as ConstTerm).value) : 0;
+  return { a, b };
+}
+
+const COMPOUND_SHAPE: Record<string, string> = {
+  none: "These two inequalities have no numbers in common, so there's no solution - that kind isn't supported yet.",
+  all: "Every number makes at least one of these true (all real numbers) - that kind isn't supported yet.",
+  same: "Both parts point the same way, so this is really just one inequality - that kind isn't supported yet.",
+};
+
+function compoundFailure(p: CompoundInequality): never {
+  if (p.kind === "sandwich") fail("The numbers on the two ends don't leave any room for the variable (no solution) - that kind isn't supported yet.");
+  const parts = p.kind === "twoPart" ? [p.p1, p.p2] : [];
+  const dirs = parts.map((q) => {
+    const less = q.sym === "<" || q.sym === "\\leq";
+    return q.a < 0 ? !less : less;
+  });
+  if (dirs[0] === dirs[1]) fail(COMPOUND_SHAPE.same);
+  const ends = parts.map((q) => (q.rhs - q.b) / q.a);
+  if (ends[0] === ends[1]) {
+    fail(p.kind === "twoPart" && p.join === "and"
+      ? `Only one number works here (${ends[0]}) - that kind isn't supported yet.`
+      : `Every number except ${ends[0]} works here - that kind isn't supported yet.`);
+  }
+  return fail(p.kind === "twoPart" && p.join === "and" ? COMPOUND_SHAPE.none : COMPOUND_SHAPE.all);
+}
+
+function routeCompound(eqs: ParsedEquation[], join: "and" | "or" | undefined): Built {
+  const vars = Array.from(new Set(eqs.flatMap((e) => e.variables)));
+  if (vars.length !== 1) fail("A compound inequality should use just one variable.");
+  const v = vars[0];
+  if (eqs.some((e) => e.usesDecimal || e.usesFraction)) fail("Compound inequalities are supported with whole numbers for now.");
+  let prob: CompoundInequality;
+  if (eqs.length === 1 && eqs[0].sandwich) {
+    const eq = eqs[0];
+    const sw = eq.sandwich!;
+    if (!isInt(sw.left) || !isInt(sw.right)) fail("Compound inequalities are supported with whole numbers for now.");
+    const { a, b } = middleParts(eq.left, "the middle");
+    const s1 = SYMBOL[eq.relation as Exclude<Relation, "=">];
+    const s2 = SYMBOL[sw.relation2 as Exclude<Relation, "=">];
+    const less = (s: ComparisonSymbol) => s === "<" || s === "\\leq";
+    if (less(s1) !== less(s2)) fail("Both inequality signs should point the same way, like -3 < 2x + 1 <= 7.");
+    prob = { kind: "sandwich", left: val(sw.left), s1, a, b, s2, right: val(sw.right) };
+  } else {
+    const parts: InequalityPart[] = eqs.map((eq) => {
+      if (!sideHasVar(eq.left) || sideHasVar(eq.right) || eq.right.length !== 1 || !isConst(eq.right[0]) || !isPlainInt(eq.right[0])) {
+        fail("Write each part with the variable on the left and one whole number on the right, like 2x + 1 < 5 or 3x - 2 > 10.");
+      }
+      const { a, b } = middleParts(eq.left, "each side with the variable");
+      return { a, b, sym: SYMBOL[eq.relation as Exclude<Relation, "=">], rhs: val((eq.right[0] as ConstTerm).value) };
+    });
+    prob = { kind: "twoPart", join: join ?? "and", p1: parts[0], p2: parts[1] };
+  }
+  const ans = solveCompound(prob);
+  const special = ans ? null : twoPartSpecial(prob);
+  if (!ans && !special) compoundFailure(prob);
+  if (special) {
+    if (prob.kind === "twoPart" && [prob.p1, prob.p2].some((q) => !Number.isInteger((q.rhs - q.b) / q.a))) {
+      fail("This compound inequality's endpoints aren't whole numbers - that kind isn't supported yet.");
+    }
+    return { skill: SKILLS.compoundIneq, instance: buildCompoundInequalityInstance(prob, v) };
+  }
+  if (!Number.isInteger(ans!.lo) || !Number.isInteger(ans!.hi)) {
+    fail("This compound inequality's endpoints aren't whole numbers - that kind isn't supported yet.");
+  }
+  return { skill: SKILLS.compoundIneq, instance: buildCompoundInequalityInstance(prob, v) };
+}
+
+// ax + b < cx + d, written in exactly that shape with whole numbers.
+function routeBothSidesInequality(eq: ParsedEquation, v: string): Built {
+  const simple = (side: SurfaceTerm[]) =>
+    side.length === 2 && isVar(side[0]) && isConst(side[1]) && side.every(isPlainInt) && !isZero((side[1] as ConstTerm).value);
+  if (!simple(eq.left) || !simple(eq.right)) {
+    fail("Inequalities with the variable on both sides are supported in the form ax + b < cx + d, with whole numbers, like 5x - 3 < 2x + 9.");
+  }
+  const aLeft = val((eq.left[0] as VarTerm).coef);
+  const aRight = val((eq.right[0] as VarTerm).coef);
+  const bLeft = val((eq.left[1] as ConstTerm).value);
+  const bRight = val((eq.right[1] as ConstTerm).value);
+  if (aLeft === aRight) fail("The variable cancels out of this inequality, so it's either always true or never true - that kind isn't supported yet.");
+  const boundary = makeFraction(bRight - bLeft, aLeft - aRight);
+  if (!isInt(boundary)) fail(INTEGER_ANSWER_ONLY);
+  if (isZero(boundary)) fail(ZERO_ANSWER);
+  return {
+    skill: SKILLS.bothSidesIneq,
+    instance: buildBothSidesInequalityInstance(
+      { aLeft, aRight, bLeft, bRight, symbol: SYMBOL[eq.relation as Exclude<Relation, "=">], boundary: val(boundary) },
       v
     ),
   };
@@ -737,12 +873,90 @@ export function routeInput(raw: string): RouteResult {
   }
   if (!parsed.ok) return { ok: false, error: parsed.error };
   const eqs = parsed.equations;
-  const latex = eqs.length === 1 ? eqs[0].latex : `\\begin{cases} ${eqs.map((e) => e.latex).join(" \\\\ ")} \\end{cases}`;
+  const join = parsed.join;
+  const latex =
+    eqs.length === 1
+      ? eqs[0].latex
+      : join
+      ? eqs.map((e) => e.latex).join(`\\text{ ${join} }`)
+      : `\\begin{cases} ${eqs.map((e) => e.latex).join(" \\\\ ")} \\end{cases}`;
 
   try {
     let options: SolveOption[];
     let variables: string[];
-    if (eqs.length === 2) {
+    if (eqs.length === 1 && eqs[0].factor) {
+      const fp = eqs[0].factor;
+      const nums = factorNumbers(fp.b, fp.c);
+      if (!nums) fail(`No two whole numbers multiply to ${fp.c} and add to ${fp.b}, so this one doesn't factor - that kind isn't supported yet (it needs the quadratic formula).`);
+      if (nums![0] === nums![1]) fail(`This one factors as (x ${nums![0] < 0 ? "-" : "+"} ${Math.abs(nums![0])})², so both answers are the same - that kind isn't supported yet.`);
+      options = [{ id: SKILLS.quadFactor.id, label: SKILLS.quadFactor.name, skill: SKILLS.quadFactor, instance: buildFactorInstance(fp, eqs[0].variables[0]) }];
+      variables = eqs[0].variables;
+    } else if (eqs.length === 1 && eqs[0].sqRoot) {
+      const sq = eqs[0].sqRoot;
+      const k = sqValue(sq);
+      if (!Number.isInteger(k)) fail("Getting the square by itself doesn't come out to a whole number here - try a problem like 2(x - 3)² + 1 = 33.");
+      if (k === 0) fail("When the square equals 0, there's just one equation (like x - 3 = 0) - that kind isn't supported yet.");
+      if (k > 0) {
+        const r = Math.round(Math.sqrt(k));
+        if (r * r !== k) fail(`${k} isn't a perfect square, so the answers would have a square root in them (like 3 ± √${k}) - that kind isn't supported yet.`);
+        if (!Number.isInteger((r - sq.n) / sq.m) || !Number.isInteger((-r - sq.n) / sq.m)) fail("This problem's answers aren't whole numbers - that kind isn't supported yet.");
+      }
+      options = [{ id: SKILLS.quadSqrt.id, label: SKILLS.quadSqrt.name, skill: SKILLS.quadSqrt, instance: buildSqInstance(sq, eqs[0].variables[0]) }];
+      variables = eqs[0].variables;
+    } else if (eqs.length === 1 && eqs[0].absIneq) {
+      const ab = eqs[0].absIneq;
+      const { k } = absIneqAfter(ab);
+      if (!Number.isInteger(k)) fail("Getting the absolute value by itself doesn't come out to a whole number here - try a problem like 2|x - 3| + 1 < 9.");
+      if (k === 0) fail("When the absolute value is compared with 0, it doesn't split into two inequalities - that kind isn't supported yet.");
+      if (k > 0 && (!Number.isInteger((k - ab.n) / ab.m) || !Number.isInteger((-k - ab.n) / ab.m))) {
+        fail("This absolute value inequality's endpoints aren't whole numbers - that kind isn't supported yet.");
+      }
+      options = [{ id: SKILLS.absIneq.id, label: SKILLS.absIneq.name, skill: SKILLS.absIneq, instance: buildAbsIneqInstance(ab, eqs[0].variables[0]) }];
+      variables = eqs[0].variables;
+    } else if (eqs.length === 1 && eqs[0].abs) {
+      const ab = eqs[0].abs;
+      const k = (ab.c - ab.b) / ab.a;
+      if (!Number.isInteger(k)) fail("Getting the absolute value by itself doesn't come out to a whole number here - try a problem like 2|x - 3| + 1 = 9.");
+      if (k === 0) fail("When the absolute value equals 0, there's just one equation (like x - 3 = 0) - that kind isn't supported yet.");
+      if (k > 0 && (!Number.isInteger((k - ab.n) / ab.m) || !Number.isInteger((-k - ab.n) / ab.m))) {
+        fail("This absolute value equation's answers aren't whole numbers - that kind isn't supported yet.");
+      }
+      options = [{ id: SKILLS.absEq.id, label: SKILLS.absEq.name, skill: SKILLS.absEq, instance: buildAbsInstance(ab, eqs[0].variables[0]) }];
+      variables = eqs[0].variables;
+    } else     if (eqs.length === 1 && eqs[0].power) {
+      const pw = eqs[0].power;
+      const plain = pw.a === 1 && pw.b === 0;
+      if (!plain && (pw.rhs.den !== 1 || (pw.rhs.num - pw.b) % pw.a !== 0)) {
+        fail("With a number in front of x² or x³, the steps are supported when every step comes out to a whole number. Try a problem like 2x² + 3 = 53.");
+      }
+      options = [{ id: SKILLS.roots.id, label: SKILLS.roots.name, skill: SKILLS.roots, instance: buildPowerInstance(pw, eqs[0].variables[0]) }];
+      variables = eqs[0].variables;
+    } else     if (eqs.length === 1 && eqs[0].literal) {
+      const lit = eqs[0].literal;
+      const letters = solvableLetters(lit.left, lit.right);
+      const target = parsed.target;
+      if (target && !letters.includes(target)) {
+        const present = eqs[0].variables.includes(target);
+        fail(
+          present
+            ? `Solving this formula for ${target} isn't supported yet (it appears more than once, is squared, or is already by itself).`
+            : `There's no ${target} in this formula.`
+        );
+      }
+      const pick = target ? [target] : letters;
+      if (pick.length === 0) fail("This formula doesn't have a letter that can be solved for in one go yet (each letter should appear just once).");
+      options = pick.map((l) => ({
+        id: `literal-${l}`,
+        label: l,
+        skill: SKILLS.literal,
+        instance: buildLiteralInstance({ left: lit.left, right: lit.right, target: l }),
+      }));
+      variables = eqs[0].variables;
+    } else if (join || eqs[0].sandwich) {
+      const built = routeCompound(eqs, join);
+      options = [{ id: built.skill.id, label: built.skill.name, ...built }];
+      variables = eqs[0].variables;
+    } else if (eqs.length === 2) {
       options = routeSystem(eqs);
       variables = ["x", "y"];
     } else {
@@ -750,7 +964,9 @@ export function routeInput(raw: string): RouteResult {
       if (eq.variables.length > 1) {
         fail(`This has ${eq.variables.length} different variables (${eq.variables.join(", ")}). For a system, type two equations separated by a comma or a new line.`);
       }
-      const built: Built = eq.proportion
+      const built: Built = eq.percent
+        ? { skill: SKILLS.decPct, instance: buildDecimalPercentInstance({ kind: "percentWord", ...eq.percent }, eq.variables[0]) }
+        : eq.proportion
         ? { skill: SKILLS.proportion, instance: buildProportionInstance(eq.proportion, eq.variables[0]) }
         : routeSingle(eq);
       options = [{ id: built.skill.id, label: built.skill.name, ...built }];

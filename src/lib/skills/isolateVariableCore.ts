@@ -46,6 +46,13 @@ export function renderConstant(value: number, forceSign: boolean = false, addGap
   return `${sign}${gap}${Math.abs(value)}`;
 }
 
+// The top of "divide both sides by the coefficient": a -1 is written out
+// ("-1x" over "-1"), so the student sees what's being divided away as soon
+// as they choose to divide.
+export function divNumerator(coef: number, symbol: string): string {
+  return coef === -1 ? `-1${symbol}` : renderMultiplyTerm(coef, symbol);
+}
+
 export function renderMultiplyTerm(
   coef: number,
   symbol: string,

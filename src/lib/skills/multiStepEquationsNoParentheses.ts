@@ -1,5 +1,5 @@
 import type { SolverInstance, SolverStep, Choice, GridRow } from "./types";
-import { BLANK, randBool, randInt, renderConstant, renderMultiplyTerm } from "./isolateVariableCore";
+import { BLANK, randBool, randInt, renderConstant, renderMultiplyTerm, divNumerator } from "./isolateVariableCore";
 
 // ---------- shared small helpers ----------
 
@@ -740,7 +740,7 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
     }
 
     if (needsDivide) {
-        const divSetup = `\\dfrac{${renderMultiplyTerm(newA, x)}}{${newA}}`;
+        const divSetup = `\\dfrac{${divNumerator(newA, x)}}{${newA}}`;
         const divRhs = `\\dfrac{${newRhs}}{${newA}}`;
         working = [...working];
         setCol(working, leftXCol, divSetup);
@@ -978,7 +978,7 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
     }
 
     if (needsDivide) {
-        const divSetup = `\\dfrac{${renderMultiplyTerm(coef, x)}}{${coef}}`;
+        const divSetup = `\\dfrac{${divNumerator(coef, x)}}{${coef}}`;
         const divRhs = `\\dfrac{${newRhs}}{${coef}}`;
         working = [...working];
         setCol(working, varCol, divSetup);

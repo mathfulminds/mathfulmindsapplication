@@ -53,42 +53,42 @@ function gcd(a: number, b: number): number {
 }
 const lcm = (a: number, b: number) => (a / gcd(a, b)) * b;
 
-function terminates(f: Fraction): boolean {
+export function terminates(f: Fraction): boolean {
   let d = f.den;
   while (d % 2 === 0) d /= 2;
   while (d % 5 === 0) d /= 5;
   return d === 1;
 }
 
-function decimalString(f: Fraction): string {
+export function decimalString(f: Fraction): string {
   const s = (Math.abs(f.num) / f.den).toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
   return f.num < 0 ? `-${s}` : s;
 }
 
 // A value as it appears in the equation (KaTeX), in the problem's mode.
-function K(f: Fraction, mode: RationalMode): string {
+export function K(f: Fraction, mode: RationalMode): string {
   if (mode === "decimal" && terminates(f)) return decimalString(f);
   if (f.den === 1) return `${f.num}`;
   return `${f.num < 0 ? "-" : ""}\\dfrac{${Math.abs(f.num)}}{${f.den}}`;
 }
-function Kabs(f: Fraction, mode: RationalMode): string {
+export function Kabs(f: Fraction, mode: RationalMode): string {
   return K(f.num < 0 ? negFraction(f) : f, mode);
 }
 // With its sign written out in front ("+ 2.5", "- \dfrac{1}{4}").
-function Ksigned(f: Fraction, mode: RationalMode, gap = true): string {
+export function Ksigned(f: Fraction, mode: RationalMode, gap = true): string {
   return `${f.num < 0 ? "-" : "+"}${gap ? SIGN_GAP : ""}${Kabs(f, mode)}`;
 }
 // A value inside prompt/choice text: decimals as plain text, fractions as
 // real KaTeX fractions.
-function P(f: Fraction, mode: RationalMode): string {
+export function P(f: Fraction, mode: RationalMode): string {
   if ((mode === "decimal" && terminates(f)) || f.den === 1) return K(f, mode);
   return `$${K(f, mode)}$`;
 }
-function Pabs(f: Fraction, mode: RationalMode): string {
+export function Pabs(f: Fraction, mode: RationalMode): string {
   return P(f.num < 0 ? negFraction(f) : f, mode);
 }
 
-function dedup(correct: string, candidates: { text: string; tag: string }[], count: number) {
+export function dedup(correct: string, candidates: { text: string; tag: string }[], count: number) {
   const seen = new Set([correct.replace(/\s+/g, "")]);
   const out: { text: string; tag: string }[] = [];
   for (const c of candidates) {
@@ -101,7 +101,7 @@ function dedup(correct: string, candidates: { text: string; tag: string }[], cou
   return out;
 }
 
-function choicesWith(correct: string, wrong: { text: string; tag: string }[]): Choice[] {
+export function choicesWith(correct: string, wrong: { text: string; tag: string }[]): Choice[] {
   return shuffle<Choice>([
     { text: correct, isCorrect: true, misconceptionTag: null },
     ...wrong.map((w) => ({ text: w.text, isCorrect: false, misconceptionTag: w.tag })),

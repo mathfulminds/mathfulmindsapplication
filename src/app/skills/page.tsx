@@ -20,6 +20,7 @@ const groups: SkillGroup[] = [
       { title: 'One-Step Equations', description: 'Undo a single operation to isolate the variable.', href: '/solve/one-step-equations' },
       { title: 'One-Step Equations with Fractions & Decimals', description: 'Undo a single operation when the numbers are fractions or decimals.', href: '/solve/one-step-fractions-decimals' },
       { title: 'Two-Step Equations', description: 'Undo two operations, one at a time.', href: '/solve/two-step-equations' },
+      { title: 'Decimal & Percent Equations', description: 'Solve equations with decimals, and turn percents into decimals.', href: '/solve/decimal-percent-equations' },
       { title: 'Proportions', description: 'Cross multiply to find the missing number in two equal ratios.', href: '/solve/proportions' },
       { title: 'Equations with Parentheses', description: 'Distribute first, then solve.', href: '/solve/parentheses-equations' },
       { title: 'Distributing a Negative', description: 'Distribute a minus sign in front of parentheses, then solve.', href: '/solve/distributing-a-negative' },
@@ -30,6 +31,9 @@ const groups: SkillGroup[] = [
       { title: 'Variables Both Sides Infinite or No Solutions', description: 'Recognize when an equation has no solution or infinitely many.', href: '/solve/variables-both-sides-infinite-or-no-solutions' },
       { title: 'Multi-Step Equations (No Parentheses)', description: 'Combine like terms on either side, then solve.', href: '/solve/multi-step-equations-no-parentheses' },
       { title: 'Multi-Step Equations (With Parentheses)', description: 'Distribute and combine like terms on either side, then solve.', href: '/solve/multi-step-equations-with-parentheses' },
+      { title: 'Literal Equations', description: 'Solve a formula for any one of its letters.', href: '/solve/literal-equations' },
+      { title: 'Square & Cube Roots', description: 'Solve x\u00b2 = 49 and x\u00b3 = -8 by taking a root of both sides.', href: '/solve/square-and-cube-roots' },
+      { title: 'Absolute Value Equations', description: 'Split |x \u2212 3| = 5 into two equations and solve both.', href: '/solve/absolute-value-equations' },
     ],
   },
   {
@@ -39,8 +43,11 @@ const groups: SkillGroup[] = [
       { title: 'One-Step Inequalities', description: 'Undo a single operation, watching for sign flips.', href: '/solve/one-step-inequalities' },
       { title: 'Two-Step Inequalities', description: 'Undo two operations to isolate the variable.', href: '/solve/two-step-inequalities' },
       { title: 'Inequalities with Parentheses', description: 'Distribute first, then solve the inequality.', href: '/solve/parentheses-inequalities' },
+      { title: 'Variables on Both Sides', description: 'Collect the variable terms on one side, watching for sign flips.', href: '/solve/variables-both-sides-inequalities' },
       { title: 'Fractional Coefficients', description: 'Solve inequalities where the variable has a fractional coefficient.', href: '/solve/fractional-coefficients-inequalities' },
       { title: 'Non-Integer Inequalities', description: 'Practice inequalities whose answers aren\u2019t whole numbers.', href: '/solve/non-integer-inequalities' },
+      { title: 'Compound Inequalities', description: 'Solve \u201cand\u201d and \u201cor\u201d inequalities and graph both endpoints.', href: '/solve/compound-inequalities' },
+      { title: 'Absolute Value Inequalities', description: 'Split |x \u2212 3| < 5 into two inequalities, solve both, and graph.', href: '/solve/absolute-value-inequalities' },
     ],
   },
   {
@@ -49,6 +56,14 @@ const groups: SkillGroup[] = [
     skills: [
       { title: 'Substitution', description: 'Isolate a variable in one equation, then substitute it into the other.', href: '/solve/systems-substitution' },
       { title: 'Elimination', description: 'Scale and combine equations to cancel out a variable.', href: '/solve/systems-elimination' },
+    ],
+  },
+  {
+    label: 'Quadratics',
+    color: 'var(--gold)',
+    skills: [
+      { title: 'Quadratics by Square Roots', description: 'Solve (x \u2212 3)\u00b2 = 16 by taking the square root of both sides.', href: '/solve/quadratics-square-roots' },
+      { title: 'Quadratics by Factoring', description: 'Factor x\u00b2 + 4x \u2212 12 = 0 with the factor pairs of 12, then solve both factors.', href: '/solve/quadratics-factoring' },
     ],
   },
 ]

@@ -1,5 +1,5 @@
 import type { SolverInstance, SolverStep, Choice, GridRow } from "./types";
-import { BLANK, assembleBothSides, randBool, randInt, renderConstant, renderMultiplyTerm } from "./isolateVariableCore";
+import { BLANK, assembleBothSides, randBool, randInt, renderConstant, renderMultiplyTerm, divNumerator } from "./isolateVariableCore";
 
 interface EquationInstance {
   aLeft: number; // left side's x-coefficient (always kept - variable stays left)
@@ -320,7 +320,7 @@ export function buildSolverInstance(
 
   // ---------- Phase 3: divide by the combined coefficient ----------
 
-  const divSetup = `\\dfrac{${renderMultiplyTerm(newA, x)}}{${newA}}`;
+  const divSetup = `\\dfrac{${divNumerator(newA, x)}}{${newA}}`;
   const divRhs = `\\dfrac{${newRhs}}{${newA}}`;
   const divRow: GridRow = {
     cells: assembleBothSides(divSetup, BLANK, BLANK, divRhs),

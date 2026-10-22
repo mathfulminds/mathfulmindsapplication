@@ -9,8 +9,7 @@ import {
   randSign,
   renderMultiplyTerm,
   renderReciprocal,
-  shuffle,
-} from "./isolateVariableCore";
+  shuffle, divNumerator } from "./isolateVariableCore";
 import {
   ComparisonSymbol,
   flipSymbol,
@@ -352,7 +351,7 @@ export function buildNonIntegerSolverInstance(
       cells: assembleRow(setupExpr1Marked, setupExpr2Marked, multipliedConstant, orientation, origSymbol),
     };
   } else {
-    const divSetup = `\\dfrac{${renderMultiplyTerm(a, variableSymbol)}}{${a}}`;
+    const divSetup = `\\dfrac{${divNumerator(a, variableSymbol)}}{${a}}`;
     const divRhs = `STACKEDFRACTION:${decimalExpansionToPlainText(simplifiedRhs)}\u0005${a}`;
     const setupExpr1 = bIsSecond ? divSetup : BLANK;
     const setupExpr2 = bIsSecond ? BLANK : divSetup;

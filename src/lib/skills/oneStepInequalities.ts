@@ -14,8 +14,7 @@ import {
   renderMultiplyTerm,
   shuffle,
   signedWord,
-  SIGN_GAP,
-} from "./isolateVariableCore";
+  SIGN_GAP, divNumerator } from "./isolateVariableCore";
 import {
   ComparisonSymbol,
   flipSymbol,
@@ -364,7 +363,7 @@ export function buildOneStepInstance(
     // plain setup; confirmCoefficientOne adds the marked version to
     // this SAME "simplified" line once "coefficient / coefficient = 1"
     // is actually confirmed, not before.
-    const divSetupUnmarked = `\\dfrac{${renderMultiplyTerm(a, variableSymbol)}}{${a}}`;
+    const divSetupUnmarked = `\\dfrac{${divNumerator(a, variableSymbol)}}{${a}}`;
     const divSetupMarked = `MARKEDFRACTION:${a}\u0006${variableSymbol}\u0005${a}`;
     const divRhs = `\\dfrac{${rhs}}{${a}}`;
     stepRow = { cells: assembleRow(divSetupUnmarked, BLANK, divRhs, orientation, origSymbol) };

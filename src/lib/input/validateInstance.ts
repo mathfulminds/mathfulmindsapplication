@@ -56,7 +56,7 @@ export function validateInstance(instance: SolverInstance, variables: string[]):
     if (DOUBLE_SIGN.test(text)) issues.push({ where, problem: `double sign in "${text}"` });
     // Prompts and explanations legitimately say things like "-x means
     // -1x" or "3x - 3x = 0x" - only the grid itself must never show them.
-    if (isCell && ONE_COEF.test(text)) issues.push({ where, problem: `coefficient of 1 written out in "${text}"` });
+    if (isCell && ONE_COEF.test(text.replace(/\\dfrac\{-1(?=[a-zA-Z|])/g, "\\dfrac{"))) issues.push({ where, problem: `coefficient of 1 written out in "${text}"` });
     if (isCell && ZERO_COEF.test(text)) issues.push({ where, problem: `zero coefficient in "${text}"` });
     if (isCell && SIGNED_ZERO_TERM.test(text)) issues.push({ where, problem: `signed zero term in "${text}"` });
   }
@@ -129,7 +129,13 @@ export function validateInstance(instance: SolverInstance, variables: string[]):
     return h === "success";
   });
   const finalRow = successRows[successRows.length - 1];
-  if (finalRow && !rowCells(finalRow).some((c) => /\d|solution/i.test(c))) {
+  // (A formula's answer can be all letters, like t = d/r: then it just has
+  // to have something on both sides of the "=".)
+  const filled = (c: string) => c.replace(/\\phantom\{0\}/g, "").trim() !== "";
+  const cells = finalRow ? rowCells(finalRow) : [];
+  const eqAt = cells.indexOf("=");
+  const bothSides = eqAt > 0 && cells.slice(0, eqAt).some(filled) && cells.slice(eqAt + 1).some(filled);
+  if (finalRow && !cells.some((c) => /\d|solution|real numbers/i.test(c)) && !bothSides) {
     issues.push({ where: "final row", problem: "the answer row doesn't show a value" });
   }
 

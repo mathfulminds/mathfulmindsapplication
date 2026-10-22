@@ -16,6 +16,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { InlineMath } from "react-katex";
 import "katex/dist/katex.min.css";
+import { pastedToLatex } from "@/lib/input/pasteText";
 
 // The subset of MathLive's element API this component uses.
 interface MathfieldLike extends HTMLElement {
@@ -71,6 +72,7 @@ const GROUPS: { name: string; buttons: ToolButton[] }[] = [
       // "*" (not "×") so it can't be mistaken for the variable x.
       { label: "\\ast", insert: "\\ast", aria: "times" },
       { label: "\\div", insert: "\\div", aria: "divided by" },
+      { label: "\\%", insert: "\\%", aria: "percent" },
     ],
   },
   {
@@ -140,6 +142,60 @@ function cursorAtEndOfDenominator(field: MathfieldLike): boolean {
   }
 }
 
+// Word problems ("What is 25% of 40?"). In math mode the editor drops
+// spaces and draws letters as slanted variables, so the moment two letters
+// are typed in a row - a word, since a variable is always one letter - the
+// editor switches to word (text) mode: spaces are kept and words look like
+// words. A space the student typed before the word (after a number, which
+// math mode dropped) is put back. After "and" / "or" between two
+// inequalities, it switches back to math for the next inequality.
+const WORD_STARTS = ["what", "is", "of", "percent", "out", "number", "and", "or", "solve", "for", "find", "the"];
+
+function wordMode(field: MathfieldLike) {
+  try {
+    const pos = field.position;
+    if (field.mode === "math" && pos >= 2) {
+      const at = (a: number, b: number) => (a >= 0 ? field.getValue(a, b, "latex") : "");
+      const isLetter = (c: string) => /^[a-zA-Z]$/.test(c);
+      const toText = (n: number, letters: string) => {
+        const before = at(pos - n - 1, pos - n).trim();
+        // The space typed before the word (a thin math space, or dropped
+        // altogether) becomes a real space in front of the word.
+        const typedSpace = before === "\\," || before === "\\;";
+        const space = typedSpace || /[0-9a-zA-Z%?)]$/.test(before) ? " " : "";
+        for (let i = 0; i < n + (typedSpace ? 1 : 0); i++) field.executeCommand("deleteBackward");
+        field.executeCommand(["switchMode", "text"]);
+        field.insert(space + letters, { mode: "text" });
+      };
+      // Only the start of a real word - letters side by side are also
+      // products in formulas ("rt", "mx", "lwh"), which stay math.
+      const lastTwo = at(pos - 2, pos);
+      if (/^[a-zA-Z]{2}$/.test(lastTwo) && !isLetter(at(pos - 3, pos - 2))) {
+        if (WORD_STARTS.some((w) => w.startsWith(lastTwo.toLowerCase()))) toText(2, lastTwo);
+        return;
+      }
+      // A word right after a letter ("...2w for w", typed without the
+      // space math mode drops): caught once three of its letters are in.
+      const lastThree = at(pos - 3, pos);
+      if (/^[a-zA-Z]{3}$/.test(lastThree) && isLetter(at(pos - 4, pos - 3))) {
+        if (WORD_STARTS.some((w) => w.length >= 3 && w.startsWith(lastThree.toLowerCase()))) toText(3, lastThree);
+      }
+      return;
+    }
+    if (field.mode === "text") {
+      const text = field.getValue(0, pos, "latex");
+      // "... x < 2 or " / "... and ": back to math for the second inequality
+      // ... and after "Solve " at the start, for the formula itself
+      const plain = text.replace(/\\text\{|\}/g, "");
+      if ((/[<>]|\\le|\\ge/.test(text) && /\b(or|and) $/i.test(plain)) || /^\s*solve $/i.test(plain)) {
+        field.executeCommand(["switchMode", "math"]);
+      }
+    }
+  } catch {
+    // Older/newer editor internals: just leave the typing as it is.
+  }
+}
+
 const MathInput = forwardRef<MathInputHandle, Props>(function MathInput({ onChange, onSubmit, ariaLabel }, ref) {
   const hostRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<MathfieldLike | null>(null);
@@ -169,11 +225,49 @@ const MathInput = forwardRef<MathInputHandle, Props>(function MathInput({ onChan
           onSubmitRef.current();
           return;
         }
+        if (inputType === "insertText") wordMode(field!);
+        if (field!.value === "" && field!.mode !== "math") field!.executeCommand(["switchMode", "math"]);
         onChangeRef.current(field!.value);
       });
+      // "?" (Shift + "/") ends a word problem - type it as a question
+      // mark, not as the start of a fraction.
+      field.addEventListener(
+        "keydown",
+        (e: Event) => {
+          const ke = e as KeyboardEvent;
+          if (ke.key === "?") {
+            ke.preventDefault();
+            ke.stopImmediatePropagation();
+            field!.insert("?");
+            onChangeRef.current(field!.value);
+          }
+        },
+        { capture: true }
+      );
+      // Pasting a problem with words keeps the words' spaces (see pastedToLatex).
+      field.addEventListener(
+        "paste",
+        (e: Event) => {
+          const text = (e as ClipboardEvent).clipboardData?.getData("text/plain") ?? "";
+          const latex = pastedToLatex(text);
+          if (latex === null) return;
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          field!.executeCommand(["switchMode", "math"]);
+          field!.insert(latex, { format: "latex", mode: "math" });
+          onChangeRef.current(field!.value);
+        },
+        { capture: true }
+      );
       field.addEventListener("beforeinput", (e: Event) => {
         const ie = e as InputEvent;
         if (ie.inputType !== "insertText" || !ie.data) return;
+        if (ie.data === "?") {
+          e.preventDefault();
+          field!.insert("?");
+          onChangeRef.current(field!.value);
+          return;
+        }
         // Typing "*" should give the same "*" the toolbar button does.
         if (ie.data === "*") {
           e.preventDefault();
@@ -212,6 +306,18 @@ const MathInput = forwardRef<MathInputHandle, Props>(function MathInput({ onChan
         field.smartFence = true;
         field.smartSuperscript = true;
         field.inlineShortcuts = INLINE_SHORTCUTS;
+        // A space typed in math is kept (math mode normally drops it), so
+        // "x < 2 or x > 5" looks the way it's typed.
+        field.mathModeSpace = "\\,";
+        // "?" is a question mark, never a fraction - in every browser. (The
+        // keydown handler above covers Chrome; Safari can report Shift + "/"
+        // to the editor as a plain "/", so the editor's own key list gets the
+        // same rule. Later entries win.)
+        const kb = (field as unknown as { keybindings: { key: string; ifMode?: string; command: unknown }[] }).keybindings;
+        (field as unknown as { keybindings: unknown }).keybindings = [
+          ...kb,
+          { key: "shift+[Slash]", ifMode: "math", command: ["insert", "?"] },
+        ];
         field.menuItems = [];
         // Draw "≠" inside the field the same way as the button: an "=" with
         // a long slash through it. The field's value is still "\\ne", so
@@ -343,7 +449,8 @@ const MathInput = forwardRef<MathInputHandle, Props>(function MathInput({ onChan
         .math-tool:active { transform: translateY(1px); }
         .math-tool .katex { font-size: 1.05em; }
         .math-tool.small-math .katex { font-size: 0.9em; }
-        .math-tool.frac-math .katex { font-size: 0.72em; }
+        .math-tool.frac-math .katex { font-size: 1em; line-height: 1; }
+        .math-tool.frac-math { padding: 0 10px; }
         .mm-ne-btn { position: relative; display: inline-block; line-height: 1; }
         .mm-ne-btn::after {
           content: "";
