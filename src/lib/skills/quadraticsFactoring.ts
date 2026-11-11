@@ -5,7 +5,7 @@
 //      blanks (x   )(x   ) = 0 appear.
 //   3. Which signs make it work? The numbers multiply to -12 and add to 4:
 //      (x + 6)(x - 2) = 0.
-//   4. If two things multiply to 0, one of them is 0: x + 6 = 0 or x - 2 = 0,
+//   4. If two factors multiply to 0, one of them is 0: x + 6 = 0 or x - 2 = 0,
 //      each solved like any other equation, side by side with "or" staying
 //      in place (the same layout as Absolute Value Equations).
 
@@ -54,7 +54,35 @@ export function factorPairs(n: number): [number, number][] {
   return out;
 }
 
-export function buildFactorInstance(prob: FactorProblem, x: string = "x"): SolverInstance {
+
+// A line whose 0 is on the left ("0 = x² + x - 12"): the "=" sits in the
+// same column as in the two equations it splits into ("0 = x + 4 or
+// 0 = x - 3"), so every "=" lines up.
+export function zeroLeftLine(left: string, right: string): GridRow {
+  return { cells: [left, REL(EQ), right, BLANK, BLANK, BLANK, BLANK, BLANK, BLANK], spanNext: [2], noWidthCols: [0, 2] };
+}
+
+// "x + 4 = 0 or x - 3 = 0" written the other way around ("0 = x + 4 or
+// 0 = x - 3") for a problem whose 0 is on the left
+export function zeroLeftText(t: string): string {
+  return t
+    .split(" or ")
+    .map((part) => {
+      const m = part.match(/^(.*?) = (.*?)( only)?$/);
+      return m ? `${m[2]} = ${m[1]}${m[3] ?? ""}` : part;
+    })
+    .join(" or ");
+}
+
+export function buildFactorInstance(
+  prob: FactorProblem,
+  x: string = "x",
+  // steps that get it ready first; zeroLeft: its 0 is on the left
+  // ("0 = x² + x - 12"), and stays there on every line
+  prelude?: { initialRow: GridRow; steps: SolverStep[]; zeroLeft?: boolean }
+): SolverInstance {
+  const zl = !!prelude?.zeroLeft;
+  const eq0 = (t: string) => (zl ? `0 = ${t}` : `${t} = 0`);
   const { b, c } = prob;
   const fn = factorNumbers(b, c);
   if (!fn) throw new Error("quadratic doesn't factor over the integers");
@@ -66,13 +94,12 @@ export function buildFactorInstance(prob: FactorProblem, x: string = "x"): Solve
   const e = 4;
 
   const line = (term: string, highlight?: GridRow["highlight"]): GridRow => ({
-    cells: [term, BLANK, REL(EQ), "0", BLANK, BLANK, BLANK, BLANK, BLANK],
-    spanNext: [0],
-    noWidthCols: [0, 3],
+    ...(zl ? zeroLeftLine("0", term) : { cells: [term, BLANK, REL(EQ), "0", BLANK, BLANK, BLANK, BLANK, BLANK], spanNext: [0], noWidthCols: [0, 3] }),
     ...(highlight ? { highlight } : {}),
   });
-  const initialRow = line(quadraticTex(b, c, x));
-  const steps: SolverStep[] = [];
+  const initialRow = prelude ? prelude.initialRow : line(quadraticTex(b, c, x));
+  // (getting it ready - one side 0, a GCF out - comes first, when needed)
+  const steps: SolverStep[] = prelude ? [...prelude.steps] : [];
 
   // ---------- 1. the factor pairs of c ----------
   const list = { title: `Factor pairs of ${n}`, items: pairs.map(([d, e2]) => `${d} \\cdot ${e2}`) };
@@ -101,7 +128,7 @@ export function buildFactorInstance(prob: FactorProblem, x: string = "x"): Solve
   steps.push({
     stepId: "factor_pick_pair",
     rowUpdates: [{ slotId: "factored", row: line(blanks) }],
-    prompt: `Of these factor pairs, which one adds to give ${b}? (Each number can be positive or negative.)`,
+    prompt: `Of these factor pairs, which one multiplies to ${c} and adds to give ${b}? (Each number can be positive or negative.)`,
     choices: shuffle(pairChoices),
     explanationOnCorrect:
       c < 0
@@ -138,12 +165,16 @@ export function buildFactorInstance(prob: FactorProblem, x: string = "x"): Solve
 
   // ---------- 4. zero product: split into two equations ----------
   // (constants in their own columns, like every two-part line)
-  const split: GridRow = { cells: [x, renderConstant(p, true), REL(EQ), "0", JOIN("or"), x, renderConstant(q, true), REL(EQ), "0"] };
+  const split: GridRow = {
+    cells: zl
+      ? ["0", REL(EQ), x, renderConstant(p, true), JOIN("or"), "0", REL(EQ), x, renderConstant(q, true)]
+      : [x, renderConstant(p, true), REL(EQ), "0", JOIN("or"), x, renderConstant(q, true), REL(EQ), "0"],
+  };
   const ans = `${factorText(p, x)} = 0 or ${factorText(q, x)} = 0`;
   steps.push({
     stepId: "factor_zero_product",
     rowUpdates: [{ slotId: "split", row: split }],
-    prompt: `If two things multiply to 0, one of them has to be 0. Which two equations does ${$(`${factored} = 0`)} make?`,
+    prompt: `If two factors multiply to 0, one of them has to be 0. Which two equations does ${$(eq0(factored))} make?`,
     choices: withCorrect(ans, dedup(ans, [
       { text: `${x} = ${p} or ${x} = ${q}`, tag: "takes_numbers_as_answers" },
       { text: `${factorText(p, x)} = 0 only`, tag: "forgot_second_factor" },
@@ -152,11 +183,17 @@ export function buildFactorInstance(prob: FactorProblem, x: string = "x"): Solve
     explanationOnCorrect: `The only way a product is 0 is if one of the factors is 0. So ${factorText(p, x)} = 0 or ${factorText(q, x)} = 0.`,
   });
 
+  if (zl) {
+    const zp = steps[steps.length - 1];
+    zp.choices = zp.choices.map((ch) => ({ ...ch, text: zeroLeftText(ch.text) }));
+    zp.explanationOnCorrect = `The only way a product is 0 is if one of the factors is 0. So ${zeroLeftText(ans)}.`;
+  }
+
   // ---------- 5. solve both ----------
   return buildTwoPart(
     { kind: "twoPart", join: "or", p1: { a: 1, b: p, sym: EQ, rhs: 0 }, p2: { a: 1, b: q, sym: EQ, rhs: 0 } },
     x,
-    { equation: true, lead: { initialRow, steps, startSlot: "split" } }
+    { equation: true, varRightAll: zl, lead: { initialRow, steps, startSlot: "split" } }
   );
 }
 

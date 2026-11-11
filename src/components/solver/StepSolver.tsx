@@ -5,6 +5,8 @@ import type { ReactNode } from "react";
 import { InlineMath as KatexInlineMath } from "react-katex";
 import "katex/dist/katex.min.css";
 import type { DistributeVisual, GridRow, PairedGridRow, SolverInstance, SolverStep, SideList } from "@/lib/skills/types";
+import { moveTag } from "@/lib/skills/types";
+import { termTag } from "@/lib/skills/combiningExpressions";
 import Celebration from "@/components/solver/Celebration";
 
 function isPairedRow(row: GridRow | PairedGridRow): row is PairedGridRow {
@@ -1059,7 +1061,126 @@ function InlineMath({ math }: { math: string }) {
   return <KatexInlineMath math={strutFractions(math)} />;
 }
 
+// An expression whose like terms get shapes (combining like terms): each
+// term is its own piece, spaced by measuring it - just enough room between
+// terms for the shapes around them (with a few pixels between shapes). The
+// whole expression stays on one line, scaled down to fit when it's long.
+// Shape sizes here match the ones AnchoredEquation draws (GridRow.marks).
+// Shape sizes for a term w wide on a line whose glyphs are h tall - shared
+// by the spacing (TermRun) and the drawing (AnchoredEquation), so they agree.
+// Triangles stand tall and narrow (the term sits in the wide bottom part);
+// diamonds are just big enough to clear the term's corners.
+function triangleShape(w: number, h: number) {
+  const above = 1.4 * h; // apex above the top of the glyphs
+  const below = 2; // base under the bottom of the glyphs
+  // (wide enough that its sides clear the term's top corners by 2px)
+  const half = ((w / 2 + 2) * (above + h + below)) / above;
+  return { half, above, below };
+}
+function diamondShape(w: number, h: number) {
+  return { W: (w / 2) * 1.45 + 4, H: (h / 2 + 3) * 1.6 };
+}
+
+const TERMRUN_PREFIX = "TERMRUN:";
+type TermRunLayout = { m: number[]; trail: number; scale: number };
+// (the work's lines are rebuilt on every step, so a finished layout is
+// remembered here - a rebuilt line starts already in place)
+const termRunCache = new Map<string, TermRunLayout>();
+function TermRun({ payload }: { payload: string }) {
+  const { t, s } = JSON.parse(payload) as { t: string[]; s: string[] };
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const [lay, setLay] = useState<TermRunLayout | null>(() => termRunCache.get(payload) ?? null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const cur = lay?.scale ?? 1;
+    const kids = Array.from(el.children) as HTMLElement[];
+    // each term's own glyphs (the tagged spans), unscaled
+    const boxes = kids.map((k) => {
+      const bs = Array.from(k.querySelectorAll<HTMLElement>("span"))
+        .filter((x) => x.style.color)
+        .map((x) => x.getBoundingClientRect())
+        .filter((b) => b.width > 0);
+      if (!bs.length) return null;
+      return { l: Math.min(...bs.map((b) => b.left)), r: Math.max(...bs.map((b) => b.right)), t: Math.min(...bs.map((b) => b.top)), b: Math.max(...bs.map((b) => b.bottom)) };
+    });
+    if (boxes.some((b) => !b)) return;
+    const bx = boxes as { l: number; r: number; t: number; b: number }[];
+    const H = (Math.max(...bx.map((b) => b.b)) - Math.min(...bx.map((b) => b.t))) / cur;
+    const P = 3;
+    const hb = H / 2 + P;
+    const ext = bx.map((b, i) => {
+      const w = (b.r - b.l) / cur;
+      switch (s[i]) {
+        case "circle": {
+          const ry = hb * 1.05;
+          return Math.max((w / 2) * 1.16 + 2, ry * 0.95) - w / 2;
+        }
+        case "box":
+          return P + 2;
+        case "triangle":
+          return triangleShape(w, H).half - w / 2;
+        case "diamond":
+          return diamondShape(w, H).W - w / 2;
+        case "line":
+          return 1;
+        default:
+          return 0;
+      }
+    });
+    // (glyph edges sit a little inside each piece; measured, not assumed)
+    const inset = bx.map((b, i) => ({ l: (b.l - kids[i].getBoundingClientRect().left) / cur, r: (kids[i].getBoundingClientRect().right - b.r) / cur }));
+    const GAP = 6;
+    // the same small gap between every pair of shapes (outline to outline)
+    const m = ext.map((e, i) => (i === 0 ? e + 2 - inset[0].l : ext[i - 1] + e + GAP - inset[i - 1].r - inset[i].l));
+    const trail = ext[ext.length - 1] + 2 - inset[inset.length - 1].r;
+    const natural = kids.reduce((sum, k) => sum + k.getBoundingClientRect().width / cur, 0) + m.reduce((a, b) => a + b, 0) + trail;
+    // fit the space the work has (the card's work side, less its padding)
+    const panel = el.closest(".step-solver-panel-left") as HTMLElement | null;
+    const avail = panel ? panel.clientWidth - 56 - 40 : Infinity;
+    const scale = Math.min(1, Math.max(0.45, avail / natural));
+    const next = { m: m.map((v) => Math.round(v * 10) / 10), trail: Math.round(trail * 10) / 10, scale: Math.round(scale * 100) / 100 };
+    // (only a real change: measuring at a smaller size rounds a little
+    // differently, and chasing that would never settle)
+    const differs =
+      !lay ||
+      Math.abs(next.scale - lay.scale) > 0.015 ||
+      Math.abs(next.trail - lay.trail) > 1 ||
+      next.m.some((v, i) => Math.abs(v - (lay.m[i] ?? 0)) > 1);
+    if (differs) {
+      termRunCache.set(payload, next);
+      setLay(next);
+    }
+  });
+  // once the terms move into place, the marks drawn over them are measured
+  // again (AnchoredEquation listens for this)
+  const announced = useRef<TermRunLayout | null>(lay);
+  useLayoutEffect(() => {
+    if (lay && lay !== announced.current) {
+      announced.current = lay;
+      window.dispatchEvent(new Event("termrun-layout"));
+    }
+  }, [lay]);
+  const sc = lay?.scale ?? 1;
+  return (
+    <span ref={ref} style={{ display: "inline-flex", alignItems: "baseline", fontSize: `${sc}em`, paddingRight: (lay?.trail ?? 0) * sc }}>
+      {t.map((tex, i) => (
+        <span key={i} style={{ marginLeft: (lay?.m[i] ?? 8) * sc }}>
+          <InlineMath math={tex} />
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function Cell({ math, color, align = "center" }: { math: string; color: string; align?: "center" | "right" | "left" }) {
+  if (math.startsWith(TERMRUN_PREFIX)) {
+    return (
+      <div style={{ textAlign: align, color, overflow: "visible", lineHeight: 1.8, whiteSpace: "nowrap" }}>
+        <TermRun payload={math.slice(TERMRUN_PREFIX.length)} />
+      </div>
+    );
+  }
   const isLeftAlign = math.startsWith(LEFTALIGN_PREFIX);
   const content = isLeftAlign ? math.slice(LEFTALIGN_PREFIX.length) : math;
   const isPlainText = content.startsWith(PLAINTEXT_PREFIX);
@@ -2349,6 +2470,212 @@ function AnchoredEquation({
     if (JSON.stringify(next) !== JSON.stringify(boxes)) setBoxes(next);
   });
 
+  // Arrows carrying terms across the "=" (GridRow.moveArrows): each one
+  // arcs from the term it moves, over the "=", to the end of the other side,
+  // with its label ("-6x") above it. Each arrow arcs higher than the one
+  // before, high enough that it clears the earlier arrow's label. Measured
+  // from the page; the line keeps the room for all of them from the start,
+  // so nothing moves when one appears.
+  type MoveArrowGeo = { d: string; head: string; lx: number; ly: number; shown: boolean };
+  const [moveGeo, setMoveGeo] = useState<{ reserve: Record<string, number>; arrows: Record<string, MoveArrowGeo[]> }>({ reserve: {}, arrows: {} });
+  const moveSpecs = slotOrderAll
+    .map((slot, i) => ({ slot, i, spec: (slotVersions[slot] ?? []).find((v) => v.moveArrows)?.moveArrows }))
+    .filter((m) => m.spec) as { slot: string; i: number; spec: NonNullable<GridRow["moveArrows"]> }[];
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!grid || !moveSpecs.length) return;
+    const g = grid.getBoundingClientRect();
+    const reserve: Record<string, number> = {};
+    const arrows: Record<string, MoveArrowGeo[]> = {};
+    const GLYPHS = ".katex-html .mord, .katex-html .mbin, .katex-html .mrel, .katex-html .mopen, .katex-html .mclose, .katex-html .mpunct";
+    const rgb = (hex: string) => `rgb(${parseInt(hex.slice(1, 3), 16)}, ${parseInt(hex.slice(3, 5), 16)}, ${parseInt(hex.slice(5, 7), 16)})`;
+    for (const { slot, i, spec } of moveSpecs) {
+      // (just the two sides - the blank cells hold invisible placeholders)
+      const cells = Array.from(grid.querySelectorAll<HTMLElement>(`[data-row-slot="${CSS.escape(slot)}"][data-col]`)).filter((el) =>
+        spec.sideCols.includes(Number(el.getAttribute("data-col")))
+      );
+      if (!cells.length) continue;
+      const row = rows[i] as GridRow | undefined;
+      const count = row?.moveArrows?.count ?? 0;
+      const glyphs = cells.flatMap((el) => Array.from(el.querySelectorAll<HTMLElement>(GLYPHS))).filter((el) => !el.closest(".pstrut, .strut"));
+      const rects = glyphs.map((el) => el.getBoundingClientRect()).filter((b) => b.width > 0);
+      if (!rects.length) continue;
+      const glyphTop = Math.min(...rects.map((b) => b.top));
+      // the room the line already has above its glyphs, without the padding
+      // held for the arrows
+      const cellTop = Math.min(...cells.map((el) => el.getBoundingClientRect().top));
+      const curPad = moveGeo.reserve[slot] ?? 0;
+      const naturalGap = glyphTop - (cellTop + curPad);
+      const tagged = (k: number) => {
+        const want = rgb(moveTag(k));
+        const els = cells.flatMap((el) => Array.from(el.querySelectorAll<HTMLElement>("span"))).filter((el) => el.style.color === want);
+        const bs = els.map((el) => el.getBoundingClientRect()).filter((b) => b.width > 0);
+        return bs.length ? { left: Math.min(...bs.map((b) => b.left)), right: Math.max(...bs.map((b) => b.right)) } : null;
+      };
+      // where the arrows land: just past the end of the other side
+      const landCell = cells.find((el) => Number(el.getAttribute("data-col")) === (spec.to === "left" ? spec.sideCols[0] : spec.sideCols[1]));
+      const landRects = landCell
+        ? Array.from(landCell.querySelectorAll<HTMLElement>(GLYPHS)).filter((el) => !el.closest(".pstrut, .strut")).map((el) => el.getBoundingClientRect()).filter((b) => b.width > 0)
+        : [];
+      if (!landRects.length) continue;
+      const lx = Math.max(...landRects.map((b) => b.right)) - g.left + (spec.to === "right" ? 6 : 2);
+      const y0 = glyphTop - g.top - 3;
+      // each arrow is half an ellipse from the term down to the landing spot;
+      // the term nearest the landing spot gets the lowest arrow, and each
+      // one farther out arcs over the ones inside it
+      const out: MoveArrowGeo[] = [];
+      let prevLabel: { l: number; r: number; top: number } | null = null;
+      let prevH = 0;
+      let highest = y0;
+      const toRight = spec.to === "right";
+      const srcs = spec.labels.map((_lab, k) => {
+        const src = tagged(k);
+        return src ? { k, sx: (src.left + src.right) / 2 - g.left } : null;
+      }).filter((v): v is { k: number; sx: number } => !!v);
+      srcs.sort((m, n) => Math.abs(m.sx - lx) - Math.abs(n.sx - lx));
+      for (const { k, sx } of srcs) {
+        const cx = (sx + lx) / 2;
+        const rx = Math.abs(sx - lx) / 2;
+        // A rounded arch: straight up from the term, flat across the top,
+        // straight down to the landing spot - so an arrow passing over a
+        // smaller one only has to be just taller than that one's label.
+        const R = Math.min(12, rx * 0.6);
+        let h = Math.max(14, prevH + 10);
+        if (prevLabel) h = Math.max(h, y0 - prevLabel.top + 4);
+        prevH = h;
+        const labEl = grid.querySelector<HTMLElement>(`[data-move-label="${CSS.escape(slot)}-${k}"]`);
+        const lw = labEl?.offsetWidth ?? 30;
+        const lh = labEl?.offsetHeight ?? 20;
+        // centered on the top of its arrow (nudged off the landing spot only
+        // if the arrow is too narrow - the taller arrows come down there)
+        const midX = toRight ? Math.min(cx, lx - 13 - lw / 2) : Math.max(cx, lx + 13 + lw / 2);
+        const labTop = y0 - h - 2 - lh;
+        prevLabel = { l: midX - lw / 2, r: midX + lw / 2, top: labTop };
+        highest = Math.min(highest, labTop, y0 - h);
+        out[k] = {
+          d: (() => {
+            const dir = lx < sx ? -1 : 1; // which way the arrow travels
+            const top = y0 - h;
+            const r = Math.min(R, h * 0.7);
+            const f = (n: number) => n.toFixed(1);
+            return `M ${f(sx)} ${f(y0)} L ${f(sx)} ${f(top + r)} Q ${f(sx)} ${f(top)} ${f(sx + dir * r)} ${f(top)} L ${f(lx - dir * r)} ${f(top)} Q ${f(lx)} ${f(top)} ${f(lx)} ${f(top + r)} L ${f(lx)} ${f(y0 - 6)}`;
+          })(),
+          head: `${(lx - 4.5).toFixed(1)},${(y0 - 7).toFixed(1)} ${(lx + 4.5).toFixed(1)},${(y0 - 7).toFixed(1)} ${lx.toFixed(1)},${(y0 + 1).toFixed(1)}`,
+          lx: Math.round(midX - lw / 2),
+          ly: Math.round(labTop),
+          shown: k < count,
+        };
+      }
+      arrows[slot] = out;
+      // room above the line for the highest arrow or label
+      const need = y0 + 3 - highest + 4;
+      reserve[slot] = Math.max(0, Math.ceil(need - naturalGap));
+    }
+    if (JSON.stringify({ reserve, arrows }) !== JSON.stringify(moveGeo)) setMoveGeo({ reserve, arrows });
+  });
+
+  // Like terms marked in an expression (GridRow.marks): a circle, box,
+  // triangle or diamond around each term - sign included - or colored
+  // underlines (one per power). Measured from the page; the line keeps the
+  // room above and below for every mark it will ever get, so nothing moves.
+  type MarkGeo = { d: string; color: string; shown: boolean };
+  // (an expression's terms settle into place after this component lays out:
+  // measure again when they do)
+  const [, setRelayout] = useState(0);
+  useEffect(() => {
+    const h = () => setRelayout((n) => n + 1);
+    window.addEventListener("termrun-layout", h);
+    return () => window.removeEventListener("termrun-layout", h);
+  }, []);
+  const [markGeo, setMarkGeo] = useState<{ top: Record<string, number>; bottom: Record<string, number>; marks: MarkGeo[] }>({ top: {}, bottom: {}, marks: [] });
+  const markSpecs = slotOrderAll
+    .map((slot, i) => ({ slot, i, spec: (slotVersions[slot] ?? []).find((v) => v.marks)?.marks }))
+    .filter((m) => m.spec) as { slot: string; i: number; spec: NonNullable<GridRow["marks"]> }[];
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!grid || !markSpecs.length) return;
+    const g = grid.getBoundingClientRect();
+    const top: Record<string, number> = {};
+    const bottom: Record<string, number> = {};
+    const marks: MarkGeo[] = [];
+    const rgb = (hex: string) => `rgb(${parseInt(hex.slice(1, 3), 16)}, ${parseInt(hex.slice(3, 5), 16)}, ${parseInt(hex.slice(5, 7), 16)})`;
+    const f = (n: number) => n.toFixed(1);
+    for (const { slot, i, spec } of markSpecs) {
+      const cells = Array.from(grid.querySelectorAll<HTMLElement>(`[data-row-slot="${CSS.escape(slot)}"][data-col]`));
+      if (!cells.length) continue;
+      const shownSet = new Set(((rows[i] as GridRow | undefined)?.marks?.shown) ?? []);
+      const spans = cells.flatMap((el) => Array.from(el.querySelectorAll<HTMLElement>("span")));
+      const rects = spec.kinds.map((_k, t) => {
+        const want = rgb(termTag(t));
+        const bs = spans.filter((el) => el.style.color === want).map((el) => el.getBoundingClientRect()).filter((b) => b.width > 0);
+        return bs.length
+          ? { l: Math.min(...bs.map((b) => b.left)) - g.left, r: Math.max(...bs.map((b) => b.right)) - g.left, t: Math.min(...bs.map((b) => b.top)) - g.top, b: Math.max(...bs.map((b) => b.bottom)) - g.top }
+          : null;
+      });
+      const found = rects.filter((r): r is NonNullable<typeof r> => !!r);
+      if (!found.length) continue;
+      // every shape is the same height: the line's own top and bottom
+      const lineTop = Math.min(...found.map((r) => r.t));
+      const lineBottom = Math.max(...found.map((r) => r.b));
+      const cy = (lineTop + lineBottom) / 2;
+      const P = 3;
+      const hb = (lineBottom - lineTop) / 2 + P;
+      let hi = lineTop;
+      let lo = lineBottom;
+      rects.forEach((r, t) => {
+        const kind = spec.kinds[t];
+        if (!r || kind < 0) return;
+        const color = spec.colors[kind];
+        const cx = (r.l + r.r) / 2;
+        const ha = (r.r - r.l) / 2 + P;
+        let d = "";
+        if (spec.mode === "lines") {
+          // (in this mode, "degrees" is each kind's number of lines)
+          const n = spec.degrees[kind];
+          for (let j = 0; j < n; j++) {
+            const y = lineBottom + 5 + j * 3.5;
+            d += `M ${f(r.l)} ${f(y)} H ${f(r.r)} `;
+            lo = Math.max(lo, y + 2);
+          }
+          if (!d) return;
+        } else if (kind === 0) {
+          const ry = hb * 1.05;
+          // (a short term like "5" still gets a round circle, not a sliver)
+          const rx = Math.max((r.r - r.l) / 2 * 1.16 + 2, ry * 0.95);
+          d = `M ${f(cx - rx)} ${f(cy)} A ${f(rx)} ${f(ry)} 0 1 0 ${f(cx + rx)} ${f(cy)} A ${f(rx)} ${f(ry)} 0 1 0 ${f(cx - rx)} ${f(cy)} Z`;
+          hi = Math.min(hi, cy - ry);
+          lo = Math.max(lo, cy + ry);
+        } else if (kind === 1) {
+          const x0 = cx - ha - 2, x1 = cx + ha + 2, y0 = cy - hb, y1 = cy + hb, rr = 4;
+          d = `M ${f(x0 + rr)} ${f(y0)} H ${f(x1 - rr)} Q ${f(x1)} ${f(y0)} ${f(x1)} ${f(y0 + rr)} V ${f(y1 - rr)} Q ${f(x1)} ${f(y1)} ${f(x1 - rr)} ${f(y1)} H ${f(x0 + rr)} Q ${f(x0)} ${f(y1)} ${f(x0)} ${f(y1 - rr)} V ${f(y0 + rr)} Q ${f(x0)} ${f(y0)} ${f(x0 + rr)} ${f(y0)} Z`;
+          hi = Math.min(hi, y0);
+          lo = Math.max(lo, y1);
+        } else if (kind === 2) {
+          // apex up; the term fits inside with room to spare
+          const tri = triangleShape(r.r - r.l, lineBottom - lineTop);
+          const baseY = lineBottom + tri.below, apexY = lineTop - tri.above, half = tri.half;
+          d = `M ${f(cx)} ${f(apexY)} L ${f(cx + half)} ${f(baseY)} L ${f(cx - half)} ${f(baseY)} Z`;
+          hi = Math.min(hi, apexY);
+          lo = Math.max(lo, baseY);
+        } else {
+          const { W, H } = diamondShape(r.r - r.l, lineBottom - lineTop);
+          d = `M ${f(cx)} ${f(cy - H)} L ${f(cx + W)} ${f(cy)} L ${f(cx)} ${f(cy + H)} L ${f(cx - W)} ${f(cy)} Z`;
+          hi = Math.min(hi, cy - H);
+          lo = Math.max(lo, cy + H);
+        }
+        marks.push({ d, color, shown: shownSet.has(t) });
+      });
+      const cellTop = Math.min(...cells.map((el) => el.getBoundingClientRect().top)) - g.top;
+      const cellBottom = Math.max(...cells.map((el) => el.getBoundingClientRect().bottom)) - g.top;
+      const naturalTop = lineTop - (cellTop + (markGeo.top[slot] ?? 0));
+      const naturalBottom = cellBottom - (markGeo.bottom[slot] ?? 0) - lineBottom;
+      top[slot] = Math.max(0, Math.ceil(lineTop - hi + 4 - naturalTop));
+      bottom[slot] = Math.max(0, Math.ceil(lo - lineBottom + 4 - naturalBottom));
+    }
+    const next = { top, bottom, marks };
+    if (JSON.stringify(next) !== JSON.stringify(markGeo)) setMarkGeo(next);
+  });
+
   // Group = a line plus the annotation lines directly under it; they share
   // one set of column positions.
   const groupOf: Record<string, string> = {};
@@ -2423,7 +2750,8 @@ function AnchoredEquation({
     const color = row ? colorFor(row.highlight) : "var(--ink)";
     const annotations = row && slotId ? distributeAnnotations.filter((a) => a.targetSlotId === slotId) : [];
     const reserve = !!slotId && arcReserveSlots.has(slotId);
-    const padTop = reserve || annotations.some((a) => a.arcsShown > 0) ? 34 : 0;
+    const padTop = Math.max(reserve || annotations.some((a) => a.arcsShown > 0) ? 34 : 0, (slotId && moveGeo.reserve[slotId]) || 0, (slotId && markGeo.top[slotId]) || 0);
+    const padBottom = (slotId && markGeo.bottom[slotId]) || 0;
     const spanStart = new Map<number, ComputedAnnotation>();
     const absorbed = new Set<number>();
     for (const a of annotations) {
@@ -2494,7 +2822,7 @@ function AnchoredEquation({
               <div
                 key={`h-${vi}-${c}`}
                 aria-hidden="true"
-                style={{ gridRow: 1, gridColumn: i + 1, width: 0, overflow: "hidden", visibility: "hidden", paddingTop: padTop || undefined }}
+                style={{ gridRow: 1, gridColumn: i + 1, width: 0, overflow: "hidden", visibility: "hidden", paddingTop: padTop || undefined, paddingBottom: padBottom || undefined }}
               >
                 <Cell math={topify(texSpacing(v.cells[c] ?? ""), slotId, c)} color="var(--ink)" align={align} />
               </div>
@@ -2549,7 +2877,7 @@ function AnchoredEquation({
               const ref = fromLeft && !afterSign && aboveCell && !/^[A-Z]+:/.test(aboveCell) ? aboveCell : undefined;
               if (ref) {
                 return (
-                  <div key={c} data-row-slot={dataSlot} data-col={c} style={{ gridRow: 1, gridColumn: i + 1, justifySelf: "start", width: 0, overflow: "visible", paddingTop: padTop || undefined, transform: liftOf(c) }}>
+                  <div key={c} data-row-slot={dataSlot} data-col={c} style={{ gridRow: 1, gridColumn: i + 1, justifySelf: "start", width: 0, overflow: "visible", paddingTop: padTop || undefined, paddingBottom: padBottom || undefined, transform: liftOf(c) }}>
                     {/* zero-width, so the number above (which may itself be drawn
                         without widening its column) never widens this line */}
                     <div style={{ position: "relative", width: "fit-content" }}>
@@ -2566,6 +2894,10 @@ function AnchoredEquation({
                   </div>
                 );
               }
+              // (a note under a whole side - "+3" under "2x² + 7x" - spans
+              // the term's columns like the side itself, so it ends where
+              // that side ends)
+              if (i > 0 && spans(row, cols[i - 1])) return null;
               return (
                 <div
                   key={c}
@@ -2573,14 +2905,14 @@ function AnchoredEquation({
                   data-col={c}
                   style={{
                     gridRow: 1,
-                    gridColumn: i + 1,
+                    gridColumn: spans(row, c) ? `${i + 1} / span 2` : i + 1,
                     justifySelf: fromLeft ? "start" : "end",
                     transform: liftOf(c),
                     width: 0,
                     display: "flex",
                     justifyContent: fromLeft ? "flex-start" : "flex-end",
                     overflow: "visible",
-                    paddingTop: padTop || undefined,
+                    paddingTop: padTop || undefined, paddingBottom: padBottom || undefined,
                   }}
                 >
                   <Cell math={tightSign(texSpacing(row.cells[c] ?? ""))} color={row.successCols?.includes(c) ? "var(--green)" : color} align="right" />
@@ -2598,7 +2930,7 @@ function AnchoredEquation({
                 style={{
                   gridRow: 1,
                   gridColumn: wide ? `${i + 1} / span 2` : i + 1,
-                  paddingTop: padTop || undefined,
+                  paddingTop: padTop || undefined, paddingBottom: padBottom || undefined,
                   // drawn without widening its column (GridRow.noWidthCols): a
                   // number after a sign extends to the right; a term before
                   // one ends where its column(s) end and extends to the left
@@ -2649,6 +2981,38 @@ function AnchoredEquation({
           fontSize: 20,
         }}
       >
+        {markSpecs.length > 0 && (
+          <svg aria-hidden="true" width="1" height="1" style={{ position: "absolute", left: 0, top: 0, overflow: "visible", pointerEvents: "none" }}>
+            {markGeo.marks.filter((m) => m.shown).map((m, mi) => (
+              <path key={`mk-${mi}`} d={m.d} fill="none" stroke={m.color} strokeWidth={2.2} strokeLinejoin="round" strokeLinecap="round" />
+            ))}
+          </svg>
+        )}
+        {moveSpecs.length > 0 && (
+          <svg aria-hidden="true" width="1" height="1" style={{ position: "absolute", left: 0, top: 0, overflow: "visible", pointerEvents: "none" }}>
+            {Object.values(moveGeo.arrows).flat().filter((a) => a.shown).map((a, ai) => (
+              <g key={`mv-${ai}`}>
+                <path d={a.d} fill="none" stroke="var(--blue)" strokeWidth={1.8} strokeLinecap="round" />
+                <polygon points={a.head} fill="var(--blue)" />
+              </g>
+            ))}
+          </svg>
+        )}
+        {moveSpecs.flatMap(({ slot, spec }) =>
+          spec.labels.map((lab, k) => {
+            const geo = moveGeo.arrows[slot]?.[k];
+            return (
+              <div
+                key={`mvl-${slot}-${k}`}
+                data-move-label={`${slot}-${k}`}
+                aria-hidden={!geo?.shown}
+                style={{ position: "absolute", left: geo?.lx ?? 0, top: geo?.ly ?? 0, fontSize: 15, color: "var(--blue)", whiteSpace: "nowrap", lineHeight: 1, visibility: geo?.shown ? "visible" : "hidden", pointerEvents: "none" }}
+              >
+                <InlineMath math={lab} />
+              </div>
+            );
+          })
+        )}
         {boxes.map((b, bi) => (
           <div
             key={`box-${bi}`}
@@ -2798,6 +3162,22 @@ export default function StepSolver({
   const [celebration, setCelebration] = useState<number | null>(null);
   const celebratedRef = useRef(false);
 
+  // The work and the factor-pairs list beside it: measured, so the work
+  // side of the card is always at least wide enough for both side by side
+  // (some of the work is drawn past its own box, so CSS alone can't tell).
+  const sideWrapRef = useRef<HTMLDivElement | null>(null);
+  const [sideNeed, setSideNeed] = useState(0);
+  useLayoutEffect(() => {
+    const wrap = sideWrapRef.current;
+    if (!wrap || wrap.children.length < 2) return;
+    const [work, list] = Array.from(wrap.children) as HTMLElement[];
+    const gap = parseFloat(getComputedStyle(wrap).columnGap) || 0;
+    const panel = wrap.closest(".step-solver-panel-left") as HTMLElement | null;
+    const pad = panel ? parseFloat(getComputedStyle(panel).paddingLeft) + parseFloat(getComputedStyle(panel).paddingRight) + 1 : 0;
+    const need = Math.ceil(work.offsetWidth + gap + list.offsetWidth + pad);
+    if (Math.abs(need - sideNeed) > 1) setSideNeed(need);
+  });
+
   useEffect(() => {
     setInstance(generate());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2847,8 +3227,12 @@ export default function StepSolver({
   }
 
   for (let i = 0; i < stepIndex; i++) {
+    applyUpdates(instance.steps[i].rowUpdatesOnShow ?? []);
     applyUpdates(instance.steps[i].rowUpdates);
   }
+  // (changes made as soon as a question is asked - a number it's about,
+  // highlighted)
+  applyUpdates(currentStep.rowUpdatesOnShow ?? []);
   if (revealed) {
     applyUpdates(currentStep.rowUpdates);
   }
@@ -2896,7 +3280,7 @@ export default function StepSolver({
       slotVersions[id].push(row);
     };
     add("__initial__", instance.initialRow);
-    for (const step of instance.steps) for (const u of step.rowUpdates) add(u.slotId, u.row);
+    for (const step of instance.steps) for (const u of [...(step.rowUpdatesOnShow ?? []), ...step.rowUpdates]) add(u.slotId, u.row);
   }
 
   // Rows that will ever carry distribute arrows keep the arrows' headroom
@@ -3092,6 +3476,9 @@ export default function StepSolver({
           .step-solver-panel {
             grid-template-columns: 1fr !important;
           }
+          .side-list-wrap {
+            flex-wrap: wrap !important;
+          }
           .step-solver-panel-left {
             border-right: none !important;
             border-bottom: 1px solid var(--line);
@@ -3102,7 +3489,10 @@ export default function StepSolver({
         className="step-solver-panel"
         style={{
           display: "grid",
-          gridTemplateColumns: instance.panelRatio ?? "1fr 1fr",
+          // With a list beside the work (factor pairs), the work side is
+          // never narrower than the work and the list side by side - the
+          // question side gives up the room instead.
+          gridTemplateColumns: instance.panelRatio ?? (!isSystem && sideListAll ? `minmax(${sideNeed}px, 1fr) minmax(0, 1fr)` : "1fr 1fr"),
           border: "1px solid var(--line)",
           borderRadius: 16,
           overflow: "hidden",
@@ -3155,8 +3545,13 @@ export default function StepSolver({
           pairedLayout={instance.pairedLayout}
         />
         ) : (
-          <div style={sideListAll ? { display: "flex", alignItems: "flex-start", gap: 28, maxWidth: "100%" } : undefined}>
-          <div style={sideListAll ? { minWidth: 0, flex: "0 1 auto", width: "fit-content" } : undefined}>
+          <div ref={sideWrapRef} className={sideListAll ? "side-list-wrap" : undefined} style={sideListAll ? { display: "flex", flexWrap: "nowrap", alignItems: "flex-start", columnGap: 28, maxWidth: "100%" } : undefined}>
+          {/* The work never shrinks to make room for the list beside it
+              (squeezed columns would stretch again when a wide answer
+              appears), and the list always stays to the right of the work
+              (the question panel is narrower for these). Only on a phone,
+              where there's no room beside it, does the list go below. */}
+          <div style={sideListAll ? { flex: "none", maxWidth: "100%" } : undefined}>
           <AnchoredEquation
             rows={visibleRows as GridRow[]}
             slotIds={slotOrder}
@@ -3235,7 +3630,10 @@ export default function StepSolver({
           display: isSystem ? "flex" : "grid",
           flexDirection: "column",
           justifyContent: "center",
-          alignItems: isSystem ? undefined : "center",
+          // the question always sits at the top of its panel, however tall
+          // the work on the left gets
+          alignItems: isSystem ? undefined : "start",
+          alignContent: isSystem ? undefined : "start",
           gap: 14,
           minHeight: 320,
           minWidth: 0,
@@ -3284,7 +3682,7 @@ export default function StepSolver({
               </div>
               {/* The widest the button row ever gets (on the last step), so the
                   panel never widens - and number lines never grow - at the end. */}
-              <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10 }}>
                 <div style={{ padding: "9px 20px", fontSize: 14, fontWeight: 700, border: "1.5px solid transparent", whiteSpace: "nowrap" }}>
                   ← Previous step
                 </div>
@@ -3295,7 +3693,7 @@ export default function StepSolver({
             </div>
           ))}
         {currentStep && !isSystem && (
-          <div style={{ gridArea: "1 / 1", display: "flex", flexDirection: "column", justifyContent: "center", gap: 14, minWidth: 0 }}>
+          <div style={{ gridArea: "1 / 1", display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: 14, minWidth: 0 }}>
             {renderQuestion()}
           </div>
         )}
@@ -3379,7 +3777,7 @@ export default function StepSolver({
                 );
               })}
             </div>
-            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10 }}>
               {stepIndex > 0 && (
                 <button
                   onClick={handlePrevious}
@@ -3392,6 +3790,7 @@ export default function StepSolver({
                     padding: "9px 20px",
                     fontSize: 14,
                     fontWeight: 700,
+                    whiteSpace: "nowrap",
                     cursor: "pointer",
                   }}
                 >
@@ -3410,6 +3809,7 @@ export default function StepSolver({
                     padding: "9px 20px",
                     fontSize: 14,
                     fontWeight: 700,
+                    whiteSpace: "nowrap",
                     cursor: "pointer",
                   }}
                 >
@@ -3428,6 +3828,7 @@ export default function StepSolver({
                     padding: "9px 20px",
                     fontSize: 14,
                     fontWeight: 700,
+                    whiteSpace: "nowrap",
                     cursor: "pointer",
                   }}
                 >

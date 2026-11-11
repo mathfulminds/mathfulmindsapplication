@@ -14,6 +14,13 @@ interface SkillGroup {
 
 const groups: SkillGroup[] = [
   {
+    label: 'Expressions',
+    color: 'var(--purple, #7b4fb3)',
+    skills: [
+      { title: 'Combining Like Terms', description: 'Mark each set of like terms with a shape, then combine them: 3a \u2212 4 + 5b \u2212 1 + 7a \u2212 b.', href: '/solve/combining-like-terms-expressions' },
+    ],
+  },
+  {
     label: 'Equations',
     color: 'var(--blue)',
     skills: [
@@ -64,6 +71,7 @@ const groups: SkillGroup[] = [
     skills: [
       { title: 'Quadratics by Square Roots', description: 'Solve (x \u2212 3)\u00b2 = 16 by taking the square root of both sides.', href: '/solve/quadratics-square-roots' },
       { title: 'Quadratics by Factoring', description: 'Factor x\u00b2 + 4x \u2212 12 = 0 with the factor pairs of 12, then solve both factors.', href: '/solve/quadratics-factoring' },
+      { title: 'Quadratics by Factoring (ax\u00b2 + bx + c)', description: 'Slip and slide: factor 2x\u00b2 + 7x + 3 = 0, then solve both factors.', href: '/solve/quadratics-slip-and-slide' },
     ],
   },
 ]

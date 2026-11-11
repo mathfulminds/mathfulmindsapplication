@@ -32,6 +32,8 @@ import { generateAbsInstance } from "@/lib/skills/absoluteValue";
 import { generateAbsIneqInstance } from "@/lib/skills/absoluteValueInequalities";
 import { generateSqInstance } from "@/lib/skills/quadraticsSquareRoots";
 import { generateFactorInstance } from "@/lib/skills/quadraticsFactoring";
+import { generateSlipInstance } from "@/lib/skills/quadraticsSlipSlide";
+import { generateExpressionInstance } from "@/lib/skills/combiningExpressions";
 import { generateOneStepRationalInstance } from "@/lib/skills/oneStepRational";
 import { generateEliminationInstance } from "@/lib/skills/systemsElimination";
 import { generateSubstitutionInstanceTwoTrack } from "@/lib/skills/systemsSubstitutionHorizontal";
@@ -108,6 +110,11 @@ export const SKILL_GROUPS: SkillExampleGroup[] = [
     ],
   },
   {
+    label: "Expressions",
+    color: "var(--purple, #7b4fb3)",
+    skills: [{ title: "Combining Like Terms", skill: SKILLS.exprCombine, generate: generateExpressionInstance }],
+  },
+  {
     label: "Systems of Equations",
     color: "var(--green)",
     skills: [
@@ -121,6 +128,7 @@ export const SKILL_GROUPS: SkillExampleGroup[] = [
     skills: [
       { title: "Quadratics by Square Roots", skill: SKILLS.quadSqrt, generate: generateSqInstance },
       { title: "Quadratics by Factoring", skill: SKILLS.quadFactor, generate: generateFactorInstance },
+      { title: "Quadratics by Factoring (ax² + bx + c)", skill: SKILLS.quadSlip, generate: generateSlipInstance },
     ],
   },
 ];
@@ -148,10 +156,27 @@ function dropGhosts(t: string): string {
   return t;
 }
 
+// \textcolor{...}{...} -> its contents (nested braces allowed)
+function unwrapColors(t: string): string {
+  let i = t.indexOf("\\textcolor{");
+  while (i !== -1) {
+    const open = t.indexOf("}{", i) + 1;
+    let depth = 0;
+    let j = open;
+    for (; j < t.length; j++) {
+      if (t[j] === "{") depth++;
+      else if (t[j] === "}" && --depth === 0) break;
+    }
+    t = t.slice(0, i) + t.slice(open + 1, j) + t.slice(j + 1);
+    i = t.indexOf("\\textcolor{");
+  }
+  return t.replace(/\{\}/g, "");
+}
+
 function cellsToLatex(cells: readonly string[]): string {
   return cells
     .map((c) =>
-      dropGhosts(c)
+      unwrapColors(dropGhosts(c))
         .replace(/^SPILL:([^\u0005]*)\u0005/, "$1 ")
         .replace(/^(LEFTALIGN:|PLAINTEXT:|MARKEDTERM:)+/, "")
         .replace(/[\u0003\u0004]/g, "")
@@ -169,6 +194,7 @@ function cellsToLatex(cells: readonly string[]): string {
 }
 
 export function exampleLatex(instance: SolverInstance): string {
+  if (instance.exampleLatex) return instance.exampleLatex;
   // A word problem loads as its sentence.
   // A formula loads as the formula plus "for w".
   const solveFor = instance.problemText?.match(/^Solve for \$(.)\$\.$/);

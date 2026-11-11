@@ -40,7 +40,8 @@ import { buildPowerInstance } from "@/lib/skills/squareCubeRoots";
 import { buildAbsInstance } from "@/lib/skills/absoluteValue";
 import { buildAbsIneqInstance, absIneqAfter } from "@/lib/skills/absoluteValueInequalities";
 import { buildSqInstance, sqValue } from "@/lib/skills/quadraticsSquareRoots";
-import { buildFactorInstance, factorNumbers } from "@/lib/skills/quadraticsFactoring";
+import { buildQuadraticInstance, quadProblemError, quadSkill } from "@/lib/skills/quadraticsSetup";
+import { parseExpression, buildExpressionInstance } from "@/lib/skills/combiningExpressions";
 import type { CompoundInequality, InequalityPart } from "@/lib/skills/compoundInequalities";
 import { buildOneStepRationalInstance } from "@/lib/skills/oneStepRational";
 import type { RationalMode } from "@/lib/skills/oneStepRational";
@@ -83,6 +84,8 @@ export const SKILLS = {
   absIneq: { id: "absIneq", name: "Absolute value inequalities", href: "/solve/absolute-value-inequalities" },
   quadSqrt: { id: "quadSqrt", name: "Quadratics by square roots", href: "/solve/quadratics-square-roots" },
   quadFactor: { id: "quadFactor", name: "Quadratics by factoring", href: "/solve/quadratics-factoring" },
+  quadSlip: { id: "quadSlip", name: "Quadratics by factoring (ax² + bx + c)", href: "/solve/quadratics-slip-and-slide" },
+  exprCombine: { id: "exprCombine", name: "Combining like terms (expressions)", href: "/solve/combining-like-terms-expressions" },
   roots: { id: "roots", name: "Square & cube roots", href: "/solve/square-and-cube-roots" },
   literal: { id: "literal", name: "Literal equations", href: "/solve/literal-equations" },
   compoundIneq: { id: "compoundIneq", name: "Compound inequalities", href: "/solve/compound-inequalities" },
@@ -865,6 +868,19 @@ function routeSystem(eqs: ParsedEquation[]): SolveOption[] {
 
 
 export function routeInput(raw: string): RouteResult {
+  // An expression with no equals or inequality sign ("3a - 4 + 5b - 1 + 7a - b"):
+  // simplify it by combining like terms.
+  const plain = raw.replace(/\\(left|right|mleft|mright|displaystyle)/g, "").trim();
+  if (plain && !/[=<>≤≥≠%]|\\(le|ge|leq|geq|neq|lt|gt)(?![a-zA-Z])|\\(begin|text)/.test(plain) && /[a-zA-Z]/.test(plain.replace(/\\[a-zA-Z]+/g, ""))) {
+    const ex = parseExpression(plain.replace(/\\[dt]?frac\s*(\d)\s*(\d)/g, "\\frac{$1}{$2}"));
+    if (typeof ex === "string") return { ok: false, error: ex };
+    const instance = buildExpressionInstance(ex);
+    return {
+      ok: true,
+      latex: plain,
+      options: [{ id: SKILLS.exprCombine.id, label: SKILLS.exprCombine.name, skill: SKILLS.exprCombine, instance }],
+    };
+  }
   let parsed: ReturnType<typeof parseInput>;
   try {
     parsed = parseInput(raw);
@@ -884,12 +900,14 @@ export function routeInput(raw: string): RouteResult {
   try {
     let options: SolveOption[];
     let variables: string[];
-    if (eqs.length === 1 && eqs[0].factor) {
-      const fp = eqs[0].factor;
-      const nums = factorNumbers(fp.b, fp.c);
-      if (!nums) fail(`No two whole numbers multiply to ${fp.c} and add to ${fp.b}, so this one doesn't factor - that kind isn't supported yet (it needs the quadratic formula).`);
-      if (nums![0] === nums![1]) fail(`This one factors as (x ${nums![0] < 0 ? "-" : "+"} ${Math.abs(nums![0])})², so both answers are the same - that kind isn't supported yet.`);
-      options = [{ id: SKILLS.quadFactor.id, label: SKILLS.quadFactor.name, skill: SKILLS.quadFactor, instance: buildFactorInstance(fp, eqs[0].variables[0]) }];
+    if (eqs.length === 1 && eqs[0].quad) {
+      // set up (one side 0, a GCF out), then leading 1 -> factoring,
+      // anything else -> slip and slide
+      const q = eqs[0].quad;
+      const err = quadProblemError(q);
+      if (err) fail(err);
+      const sk = quadSkill(q) === "factor" ? SKILLS.quadFactor : SKILLS.quadSlip;
+      options = [{ id: sk.id, label: sk.name, skill: sk, instance: buildQuadraticInstance(q, eqs[0].variables[0]) }];
       variables = eqs[0].variables;
     } else if (eqs.length === 1 && eqs[0].sqRoot) {
       const sq = eqs[0].sqRoot;

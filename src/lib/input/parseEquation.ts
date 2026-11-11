@@ -17,6 +17,8 @@ import type { AbsProblem } from "@/lib/skills/absoluteValue";
 import type { AbsIneqProblem } from "@/lib/skills/absoluteValueInequalities";
 import type { SqProblem } from "@/lib/skills/quadraticsSquareRoots";
 import type { FactorProblem } from "@/lib/skills/quadraticsFactoring";
+import type { SlipProblem } from "@/lib/skills/quadraticsSlipSlide";
+import type { QuadInput, QuadTerm } from "@/lib/skills/quadraticsSetup";
 import type { Fraction } from "@/lib/skills/fraction";
 import { makeFraction, fromInt, addFraction, mulFraction, divFraction, negFraction } from "@/lib/skills/fraction";
 
@@ -98,6 +100,10 @@ export interface ParsedEquation {
   sqRoot?: SqProblem;
   // Set for x² + bx + c = 0 (factoring).
   factor?: FactorProblem;
+  // Set for ax² + bx + c = 0 with a ≥ 2 (slip and slide).
+  slip?: SlipProblem;
+  // any quadratic to factor, each side term by term as typed
+  quad?: QuadInput;
 }
 
 export interface PercentProblem {
@@ -940,36 +946,55 @@ function detectAbs(chunk: string): ParsedEquation {
   };
 }
 
-// x² + 4x - 12 = 0 (leading coefficient 1, everything on one side)
-const FACTOR_HELP = "Quadratics by factoring are supported in the shape x² + bx + c = 0, like x² + 4x - 12 = 0 (whole numbers, everything on the left, 0 on the right).";
+// A quadratic to factor: x² + 4x - 12 = 0, 2x² + 7x = -3, x² = 3x + 10,
+// 4x² + 10x + 6 = 0, 2x² + 6x = 0 (whole numbers; anything on either side).
+const FACTOR_HELP = "Quadratics by factoring are supported with whole numbers, like x² + 4x - 12 = 0, 2x² + 7x = -3 or x² = 3x + 10.";
 function isQuadraticTrinomial(chunk: string): boolean {
   const s = chunk.replace(/\s+/g, "").replace(/\^\{(\d+)\}/g, "^$1");
   const m = s.match(/([a-zA-Z])\^2/);
   if (!m) return false;
   // another x that isn't squared: x² + 4x ...
-  return new RegExp(`${m[1]}(?!\\^)`).test(s.replace(`${m[1]}^2`, ""));
+  return new RegExp(`${m[1]}(?!\\^)`).test(s.replace(new RegExp(`${m[1]}\\^2`, "g"), ""));
+}
+function polySide(side: string, v: string): QuadTerm[] {
+  if (side === "") throw new InputError(FACTOR_HELP);
+  if (/^[+-]?0$/.test(side)) return [];
+  const terms: QuadTerm[] = [];
+  const re = /([+-]?)(\d*)([a-zA-Z]?)(?:\^(\d+))?/y;
+  let i = 0;
+  while (i < side.length) {
+    re.lastIndex = i;
+    const m = re.exec(side);
+    if (!m || m[0] === "" || (i > 0 && !m[1])) throw new InputError(FACTOR_HELP);
+    const [, sign, digits, letter, pow] = m;
+    if (!digits && !letter) throw new InputError(FACTOR_HELP);
+    if (letter && letter !== v) throw new InputError("Use just one variable.");
+    if (pow && !letter) throw new InputError(FACTOR_HELP);
+    if (pow && pow !== "2" && pow !== "1") throw new InputError("Only x² terms are supported here (no higher powers).");
+    const n = digits ? Number(digits) : 1;
+    terms.push({ coef: (sign === "-" ? -1 : 1) * n, pow: !letter ? 0 : pow === "2" ? 2 : 1 });
+    i = re.lastIndex;
+  }
+  return terms;
 }
 function detectQuadratic(chunk: string): ParsedEquation {
-  const s = chunk.replace(/\s+/g, "").replace(/\^\{(\d+)\}/g, "^$1");
-  if (/[<>]/.test(s)) throw new InputError("Quadratic inequalities aren't supported yet.");
-  const m = s.match(/^([+-]?\d*)([a-zA-Z])\^2([+-]\d*)\2([+-]\d+)?=(-?\d+)$/);
-  if (!m) throw new InputError(FACTOR_HELP);
-  if (m[1] !== "" && m[1] !== "+" && m[1] !== "1") throw new InputError("Quadratics with a number in front of x² (like 2x² + 7x + 3 = 0) are their own skill - coming next. For now, try one that starts with x², like x² + 5x + 6 = 0.");
-  if (m[5] !== "0") throw new InputError("First move everything to one side so the other side is 0 - for example, x² + 5x = -6 becomes x² + 5x + 6 = 0.");
-  const coef = (t: string) => (t === "+" ? 1 : t === "-" ? -1 : Number(t));
-  const b = coef(m[3]);
-  const c = m[4] ? Number(m[4]) : 0;
-  if (c === 0) throw new InputError("With no number on its own (like x² + 4x = 0), it factors as x(x + 4) - that kind isn't supported yet.");
+  const s = chunk.replace(/\s+/g, "").replace(/\^\{(\d+)\}/g, "^$1").replace(/\\cdot|\*/g, "");
+  if (/[<>]|\\le|\\ge/.test(s)) throw new InputError("Quadratic inequalities aren't supported yet.");
+  if (/[().]/.test(s)) throw new InputError(FACTOR_HELP);
+  const sides = s.split("=");
+  if (sides.length !== 2) throw new InputError(FACTOR_HELP);
+  const v = (s.match(/([a-zA-Z])\^2/) as RegExpMatchArray)[1];
+  const quad = { left: polySide(sides[0], v), right: polySide(sides[1], v) };
   return {
     left: [],
     right: [],
     relation: "=",
-    variables: [m[2]],
+    variables: [v],
     linear: { coefs: {}, constant: fromInt(0) },
     usesDecimal: false,
     usesFraction: false,
     latex: chunk,
-    factor: { b, c },
+    quad,
   };
 }
 

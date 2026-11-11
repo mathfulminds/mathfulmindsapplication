@@ -56,6 +56,20 @@ export interface GridRow {
   successCols?: number[];
   // Groups of cells drawn inside a box (each group one box): an answer.
   boxCols?: number[][];
+  // Arrows that carry terms across the "=" (quadratics: everything moved
+  // to one side). Each term being moved is tagged in the math with
+  // \textcolor{moveTag(i)}{...} (a color you can't tell from the ink);
+  // arrow i goes from that term, over the "=", to the end of the other
+  // side, with labels[i] ("-6x") above it. `count` arrows are drawn; the
+  // room for all of them is held from the start.
+  // Like terms marked in an expression (combining like terms): each term
+  // is tagged in the math with \textcolor{termTag(i)}{...}; kinds[i] is the
+  // kind of term i, shown lists the terms marked so far. "shapes": kind 0 a
+  // circle, 1 a box, 2 a triangle, 3 a diamond. "lines": underlines in the
+  // kind's color, one per power (none under a number). Room for every mark
+  // is held from the start.
+  marks?: { mode: "shapes" | "lines"; kinds: number[]; shown: number[]; colors: string[]; degrees: number[] };
+  moveArrows?: { count: number; labels: string[]; to: "left" | "right"; sideCols: [number, number] };
   // Note cells drawn higher, right under their own numbers, on a notes line
   // that has to sit lower for something else on it (see compound inequalities).
   liftCols?: number[];
@@ -117,6 +131,9 @@ export interface SolverStep {
   // (once it's answered) - the factor pairs of c when factoring a
   // quadratic. A later step can repeat it with one item marked (boxed).
   sideList?: SideList;
+  // Optional: row changes made as soon as this question is asked (before
+  // it's answered) - a number the question is about, highlighted.
+  rowUpdatesOnShow?: RowUpdate[];
 }
 
 export interface SideList {
@@ -233,6 +250,9 @@ export interface SolverInstance {
   // single equation ever does - widening the split globally would just
   // waste space on simpler skills instead of helping anyone.
   panelRatio?: string;
+  // The problem as the student would type it, when the first line alone
+  // isn't the whole problem (a long expression wraps onto more lines).
+  exampleLatex?: string;
   // Optional: overrides the right (question) panel's padding, given as
   // a raw CSS padding value. Defaults to "32px 28px" for every skill
   // that doesn't set this. Exists for skills where the math panel
@@ -266,3 +286,7 @@ export interface SolverInstance {
   // same spot on every line. Lines usually size their own columns.
   alignColumns?: boolean;
 }
+
+// The tag for the i-th term an arrow carries across (see GridRow.moveArrows):
+// the ink color (#1c2b45) one step off, so it looks the same.
+export const moveTag = (i: number) => `#1c2b${(0x44 - i).toString(16).padStart(2, "0")}`;

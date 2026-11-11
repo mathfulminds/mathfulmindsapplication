@@ -1,7 +1,7 @@
 "use client";
 
 import StepSolver from "@/components/solver/StepSolver";
-import { generateFactorInstance } from "@/lib/skills/quadraticsFactoring";
+import { generateFactorPractice } from "@/lib/skills/quadraticsSetup";
 
 export default function QuadraticsFactoringPage() {
   return (
@@ -20,7 +20,7 @@ export default function QuadraticsFactoringPage() {
         List the factor pairs of the last number, find the pair that adds to the middle one,
         choose the signs, then solve both factors.
       </p>
-      <StepSolver generate={generateFactorInstance} skillName="Quadratics by factoring" />
+      <StepSolver generate={generateFactorPractice} skillName="Quadratics by factoring" />
     </div>
   );
 }

@@ -155,6 +155,29 @@ export function coefficientOneStep(a: number, rowUpdates: SolverStep["rowUpdates
   };
 }
 
+// num ÷ a written exactly: a whole number, or a fraction in lowest terms
+// ("-1/2" in text, -\\dfrac{1}{2} in the work) - factoring with a number in
+// front of x² gives answers like x = -1/2.
+function gcdInt(m: number, n: number): number {
+  m = Math.abs(m);
+  n = Math.abs(n);
+  while (n) [m, n] = [n, m % n];
+  return m || 1;
+}
+export function quotientParts(num: number, a: number): { n: number; d: number } {
+  const g = gcdInt(num, a);
+  const sgn = (num < 0) !== (a < 0) ? -1 : 1;
+  return { n: sgn * Math.abs(num / g), d: Math.abs(a / g) };
+}
+export function quotientText(num: number, a: number): string {
+  const { n, d } = quotientParts(num, a);
+  return d === 1 ? `${n}` : `${n}/${d}`;
+}
+export function quotientTex(num: number, a: number): string {
+  const { n, d } = quotientParts(num, a);
+  return d === 1 ? `${n}` : `${n < 0 ? "-" : ""}\\dfrac{${Math.abs(n)}}{${d}}`;
+}
+
 export function computeStep(
   stepId: string,
   num: number,
@@ -165,6 +188,24 @@ export function computeStep(
 ): SolverStep {
   const value = num / a;
   const sameSign = num >= 0 === a >= 0;
+  if (!Number.isInteger(value)) {
+    // a fraction: the choices are written as fractions too
+    const { n, d } = quotientParts(num, a);
+    // full-size fractions (\\dfrac), and a "fraction" over 1 is just the whole number
+    const f = (nn: number, dd: number) => (dd === 1 ? `${nn}` : `$${nn < 0 ? "-" : ""}\\dfrac{${Math.abs(nn)}}{${dd}}$`);
+    const right = f(n, d);
+    return {
+      stepId,
+      rowUpdates,
+      prompt: `${num} ÷ ${a} = ? ${question}`,
+      choices: withCorrect(right, dedup(right, [
+        { text: f(-n, d), tag: "sign_error" },
+        { text: f(d * (n < 0 ? -1 : 1), Math.abs(n)), tag: "flipped_fraction" },
+        { text: `${num}`, tag: "forgot_final_operation" },
+      ])),
+      explanationOnCorrect: `${num} ÷ ${a} doesn't come out to a whole number, so it stays a fraction: ${right}. ${sameSign ? "Same signs give a positive result." : "Different signs give a negative result."}${suffix}`,
+    };
+  }
   return {
     stepId,
     rowUpdates,
@@ -357,6 +398,10 @@ export interface TwoPartOptions {
   // problem split in two): the variable is on the right, and is moved to
   // the left at the very end.
   firstVarRight?: boolean;
+  // Both equations are written "0 = x + 4" (a quadratic whose 0 is on the
+  // left): each is solved where it is, the variable staying on the right
+  // ("-4 = x"), and that's the answer - nothing gets turned around.
+  varRightAll?: boolean;
   // Steps and a first line that come before the two inequalities appear
   // (the one-line problem and the "split it" step); `startSlot` is the
   // line holding the two inequalities.
@@ -366,8 +411,13 @@ export interface TwoPartOptions {
 export function buildTwoPart(p: Extract<CompoundInequality, { kind: "twoPart" }>, x: string, opts: TwoPartOptions = {}): SolverInstance {
   const { join } = p;
   const parts = [p.p1, p.p2];
-  const varRight = !!opts.firstVarRight;
-  const COLS = varRight ? [{ v: 2, c: 3, s: 1, r: 0 }, COLS_TWO_PART[1]] : COLS_TWO_PART;
+  const allRight = !!opts.varRightAll;
+  const varRight = !!opts.firstVarRight && !allRight;
+  const COLS = allRight
+    ? [{ v: 2, c: 3, s: 1, r: 0 }, { v: 7, c: 8, s: 6, r: 5 }]
+    : varRight
+    ? [{ v: 2, c: 3, s: 1, r: 0 }, COLS_TWO_PART[1]]
+    : COLS_TWO_PART;
   // "and"/"or" is the anchor column: it stays in exactly the same place on
   // every line, the way "=" does in an equation.
   const e = 4;
@@ -402,7 +452,7 @@ export function buildTwoPart(p: Extract<CompoundInequality, { kind: "twoPart" }>
   const exprText = (q: InequalityPart) => `${plainTerm(q.a, x)}${q.b === 0 ? "" : ` ${q.b > 0 ? "+" : "-"} ${Math.abs(q.b)}`}`;
   const partText = (q: InequalityPart) => {
     const i = parts.indexOf(q);
-    return varRight && i === 0 ? `${q.rhs} ${ps(q.sym)} ${exprText(q)}` : `${exprText(q)} ${ps(q.sym)} ${q.rhs}`;
+    return (varRight && i === 0) || allRight ? `${q.rhs} ${ps(q.sym)} ${exprText(q)}` : `${exprText(q)} ${ps(q.sym)} ${q.rhs}`;
   };
 
   const initial = blankRow();
@@ -565,7 +615,7 @@ export function buildTwoPart(p: Extract<CompoundInequality, { kind: "twoPart" }>
       co.explanationOnCorrect += carryNote;
       carryNote = "";
       steps.push(co);
-      res[k.r] = pc(value);
+      res[k.r] = quotientTex(after[i], q.a);
       steps.push(
         computeStep(id("compute_value"), after[i], q.a, [{ slotId: resSlot, row: rowFor(resSlot) }], "", eqMode ? `What is the value of ${x}?` : undefined)
       );
