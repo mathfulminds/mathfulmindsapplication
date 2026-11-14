@@ -42,6 +42,7 @@ import { buildAbsIneqInstance, absIneqAfter } from "@/lib/skills/absoluteValueIn
 import { buildSqInstance, sqValue } from "@/lib/skills/quadraticsSquareRoots";
 import { buildQuadraticInstance, quadProblemError, quadSkill } from "@/lib/skills/quadraticsSetup";
 import { parseExpression, buildExpressionInstance } from "@/lib/skills/combiningExpressions";
+import { planLinearEquation } from "@/lib/skills/linearGeneral";
 import type { CompoundInequality, InequalityPart } from "@/lib/skills/compoundInequalities";
 import { buildOneStepRationalInstance } from "@/lib/skills/oneStepRational";
 import type { RationalMode } from "@/lib/skills/oneStepRational";
@@ -170,6 +171,21 @@ const INTEGER_ANSWER_ONLY =
   "This problem's answer isn't a whole number, and fraction or decimal answers are only supported for problems shaped like ax + b = c right now.";
 
 // ---------- single equation / inequality ----------
+
+// The narrow skills first; anything they can't take (another arrangement
+// of parentheses or like terms, a fraction answer, a variable that cancels)
+// goes to the general planner, which works through any linear equation in
+// the same layout. Its own limits keep the original message.
+function routeSingleOrPlan(eq: ParsedEquation): Built {
+  try {
+    return routeSingle(eq);
+  } catch (e) {
+    if (!(e instanceof NotSupported) || eq.relation !== "=" || eq.variables.length !== 1) throw e;
+    const plan = planLinearEquation(eq.left, eq.right, eq.variables[0]);
+    if (!plan) throw e;
+    return { skill: plan.hasParens ? SKILLS.multiWithParen : SKILLS.multiNoParen, instance: plan.instance };
+  }
+}
 
 interface Built {
   skill: SkillInfo;
@@ -986,7 +1002,7 @@ export function routeInput(raw: string): RouteResult {
         ? { skill: SKILLS.decPct, instance: buildDecimalPercentInstance({ kind: "percentWord", ...eq.percent }, eq.variables[0]) }
         : eq.proportion
         ? { skill: SKILLS.proportion, instance: buildProportionInstance(eq.proportion, eq.variables[0]) }
-        : routeSingle(eq);
+        : routeSingleOrPlan(eq);
       options = [{ id: built.skill.id, label: built.skill.name, ...built }];
       variables = eq.variables;
     }

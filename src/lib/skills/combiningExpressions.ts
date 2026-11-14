@@ -333,15 +333,18 @@ export function buildExpressionInstance(p: ExprProblem): SolverInstance {
     const absSum = parts.reduce((s, t) => addFraction(s, makeFraction(Math.abs(t.coef.num), t.coef.den)), fromInt(0));
     const doubled: [string, number][] = k.vars.map(([v, pw]) => [v, pw * 2]);
     const last = j === combos.length - 1;
+    // an answer that doesn't come first in the answer shows its "+"
+    const after = live.indexOf(ki) > 0;
+    const opt = (f: Fraction, vars = k.vars) => `${after && f.num > 0 ? "+" : ""}${val(f, vars)}`;
     steps.push({
       stepId: j === 0 ? "combine_like_terms" : `combine_like_terms_${j + 1}`,
       rowUpdates: [{ slotId: "result", row: resultRow((m) => doneKinds.has(m) || single(m), last) }],
       prompt: `${j === 0 ? "Now combine each set of like terms. " : ""}Combine ${kindWords(ki)}: what is ${$(expr)}?`,
-      choices: withCorrect($(val(r.coef)), dedup($(val(r.coef)), [
-        { text: $(val(absSum)), tag: "ignored_negative_signs" },
-        ...(k.vars.length ? [{ text: $(val(r.coef, doubled)), tag: "added_the_exponents" }] : []),
-        { text: $(val(makeFraction(-r.coef.num, r.coef.den))), tag: "sign_error" },
-        { text: $(val(addFraction(r.coef, fromInt(1)))), tag: "arithmetic_slip" },
+      choices: withCorrect($(opt(r.coef)), dedup($(opt(r.coef)), [
+        { text: $(opt(absSum)), tag: "ignored_negative_signs" },
+        ...(k.vars.length ? [{ text: $(opt(r.coef, doubled)), tag: "added_the_exponents" }] : []),
+        { text: $(opt(makeFraction(-r.coef.num, r.coef.den))), tag: "sign_error" },
+        { text: $(opt(addFraction(r.coef, fromInt(1)))), tag: "arithmetic_slip" },
       ], 2)),
       explanationOnCorrect:
         `${$(`${expr} = ${val(r.coef)}`)}.` +

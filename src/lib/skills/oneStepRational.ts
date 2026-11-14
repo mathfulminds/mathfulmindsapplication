@@ -454,11 +454,13 @@ function buildMultiplyByReciprocal(prob: OneStepRationalProblem, v: string): Sol
   const exprLeft = orientation === "expressionLeft";
   const multVar = exprLeft ? `(${recip})${coefTerm}` : `${coefTerm}(${recip})`;
   const multConst = exprLeft ? `(${K(c, mode)})(${recip})` : `(${recip})(${K(c, mode)})`;
-  const recipRow: GridRow = { cells: assembleRow(multVar, BLANK, multConst, orientation) };
   // Once confirmed to make 1, every number in the reciprocal pair is
-  // crossed out in red, leaving just the variable.
+  // crossed out in red, leaving just the variable. (Before that, it's drawn
+  // the same way without the crosses, so nothing moves.)
   const sgn = a.num < 0 ? "-" : "";
   const markedVar = `MARKEDRECIP:${exprLeft ? "L" : "R"}\u0006${sgn}${a.den}\u0006${Math.abs(a.num)}\u0006${sgn}${Math.abs(a.num)}\u0006${a.den}\u0006${v}`;
+  void multVar;
+  const recipRow: GridRow = { cells: assembleRow(`${markedVar}\u0006plain`, BLANK, multConst, orientation) };
   const recipRowMarked: GridRow = { cells: assembleRow(markedVar, BLANK, multConst, orientation) };
   const varAlone = (value: string, highlight?: GridRow["highlight"]): GridRow => ({
     cells: assembleRow(v, BLANK, value, orientation),

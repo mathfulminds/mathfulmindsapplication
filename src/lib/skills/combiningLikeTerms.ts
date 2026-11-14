@@ -205,6 +205,11 @@ export function buildSolverInstance(
     ...(needsDivide ? {} : { highlight: "success" as const }),
   };
 
+  // "x =" first, with the number filled in by the next step (c - b)
+  const reducedRowPartial: GridRow = {
+    cells: assembleOriented(plainTerm(combinedA, x), BLANK, BLANK, BLANK),
+  };
+
   const cancelDistractors = dedupNumeric("0", [
     { text: `${2 * absB}`, tag: "flipped_the_operation" },
     { text: `${absB}`, tag: "forgot_to_apply_operation" },
@@ -219,7 +224,7 @@ export function buildSolverInstance(
     rowUpdates: [
       { slotId: "combined_terms", row: combinedRowMarked },
       { slotId: "cancel_annotation", row: cancelRowMarked },
-      { slotId: "reduced_equation", row: reducedRow },
+      { slotId: "reduced_equation", row: reducedRowPartial },
     ],
     prompt: `What is ${b} ${opSym} ${absB}?`,
     choices: shuffle([
@@ -227,9 +232,27 @@ export function buildSolverInstance(
       { text: cancelDistractors[0].text, isCorrect: false, misconceptionTag: cancelDistractors[0].tag },
       { text: cancelDistractors[1].text, isCorrect: false, misconceptionTag: cancelDistractors[1].tag },
     ]),
+    explanationOnCorrect: "The constants are opposites resulting in 0.",
+  };
+
+  // ---------- Step 3b: the other side - c minus b ----------
+  const combineConstDistractors = dedupNumeric(`${newRhs}`, [
+    { text: `${c + b}`, tag: "flipped_the_operation" },
+    { text: `${-newRhs}`, tag: "sign_error" },
+    { text: `${newRhs + 1}`, tag: "arithmetic_slip" },
+  ]);
+  const combineConstant: SolverStep = {
+    stepId: "combine_constant",
+    rowUpdates: [{ slotId: "reduced_equation", row: reducedRow }],
+    prompt: `What is ${c} ${opSym} ${absB}?`,
+    choices: shuffle([
+      { text: `${newRhs}`, isCorrect: true, misconceptionTag: null },
+      { text: combineConstDistractors[0].text, isCorrect: false, misconceptionTag: combineConstDistractors[0].tag },
+      { text: combineConstDistractors[1].text, isCorrect: false, misconceptionTag: combineConstDistractors[1].tag },
+    ]),
     explanationOnCorrect: needsDivide
-      ? "The constants are opposites resulting in 0."
-      : `The constants are opposites resulting in 0. Since the coefficient of ${x} is already 1, this is the final answer: ${x} = ${newRhs}.`,
+      ? `The terms combine to ${newRhs}. The rest of the equation gets brought down unchanged.`
+      : `The terms combine to ${newRhs}. Since the coefficient of ${x} is already 1, this is the final answer: ${x} = ${newRhs}.`,
   };
 
   // ---------- Step 4: divide by the combined coefficient ----------
@@ -353,8 +376,8 @@ export function buildSolverInstance(
   return {
     initialRow,
     steps: needsDivide
-      ? [combine, goal, cancelConstant, divide, confirmCoefficientOne, computeValue]
-      : [combine, goal, cancelConstant],
+      ? [combine, goal, cancelConstant, combineConstant, divide, confirmCoefficientOne, computeValue]
+      : [combine, goal, cancelConstant, combineConstant],
     eqColumnIndex,
     // Always genuinely 5 cells regardless of orientation - the shared
     // grid's default eqColumnIndex-based formula assumes eqColumnIndex=1

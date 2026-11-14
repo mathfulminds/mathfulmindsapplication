@@ -195,6 +195,21 @@ export interface DistributeVisual {
   // parentheses/distribution, where the diagram is valid from the very
   // first step, no gating needed.
   chooseStepId?: string;
+  // Optional: more sets of parentheses on the same side, distributed in
+  // the same line ("2(x + 1) + 3(x - 1)"). Each one follows the one before
+  // it, after its own "lead" (the sign or terms between them), and has its
+  // own two arrows, shown as its own two steps are answered. The suffix
+  // comes after the last one.
+  chain?: DistributeChainGroup[];
+}
+
+export interface DistributeChainGroup {
+  lead: string; // e.g. "+" or "+ 4x -"
+  coefficient: string;
+  term1: string;
+  term2: string;
+  firstTermStepId: string;
+  secondTermStepId: string;
 }
 
 export interface SolverInstance {

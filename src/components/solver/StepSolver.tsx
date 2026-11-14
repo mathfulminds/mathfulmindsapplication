@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { InlineMath as KatexInlineMath } from "react-katex";
 import "katex/dist/katex.min.css";
+import { autoMath } from "@/lib/display/autoMath";
+import { signChoices } from "@/lib/display/signChoices";
 import type { DistributeVisual, GridRow, PairedGridRow, SolverInstance, SolverStep, SideList } from "@/lib/skills/types";
 import { moveTag } from "@/lib/skills/types";
 import { termTag } from "@/lib/skills/combiningExpressions";
@@ -911,36 +913,51 @@ const LEFTALIGN_PREFIX = "LEFTALIGN:";
 // (L = reciprocal written first, R = reciprocal written after the term).
 const MARKEDRECIP_PREFIX = "MARKEDRECIP:";
 
-function crossedFraction(num: string, den: string, color: string): ReactNode {
+function crossedFraction(num: string, den: string, color: string, crossed = true): ReactNode {
+  // (crossed = false draws the same fraction without the red marks)
+  const part = (tex: string) => (crossed ? <XMark size="large"><InlineMath math={tex} /></XMark> : <span style={{ display: "inline-block" }}><InlineMath math={tex} /></span>);
   return (
     <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", verticalAlign: "middle", margin: "0 2px" }}>
       <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: "1.2em", padding: "0 0.2em 0.1em", lineHeight: 1.15 }}>
-        <XMark size="large">
-          <InlineMath math={num} />
-        </XMark>
+        {part(num)}
       </span>
       <span style={{ borderTop: `0.06em solid ${color}`, alignSelf: "stretch" }} />
       <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: "1.2em", padding: "0.1em 0.2em 0", lineHeight: 1.15 }}>
-        <XMark size="large">
-          <InlineMath math={den} />
-        </XMark>
+        {part(den)}
       </span>
     </span>
   );
 }
 
+
 function renderMarkedReciprocal(content: string, color: string): ReactNode {
-  const [side, rn, rd, cn, cd, v] = content.split(COEF_VAR_SEPARATOR);
+  // (a 7th part "plain" draws the same thing before anything is crossed
+  // out, so nothing moves when the crosses appear)
+  const [side, rn, rd, cn, cd, v, plain] = content.split(COEF_VAR_SEPARATOR);
+  const crossed = plain !== "plain";
+  // a negative fraction: the minus sign sits to the left of the fraction,
+  // not on top
+  const signed = (num: string, den: string) => {
+    const neg = (num.startsWith("-") ? 1 : 0) + (den.startsWith("-") ? 1 : 0);
+    return (
+      <>
+        {neg % 2 === 1 && <InlineMath math="-" />}
+        {crossedFraction(num.replace(/^-/, ""), den.replace(/^-/, ""), color, crossed)}
+      </>
+    );
+  };
   const recip = (
     <>
       (
-      {crossedFraction(rn, rd, color)}
+      {signed(rn, rd)}
       )
     </>
   );
   const term = (
     <>
-      {crossedFraction(cn, cd, color)}
+      (
+      {signed(cn, cd)}
+      )
       <InlineMath math={v} />
     </>
   );
@@ -974,6 +991,8 @@ const STACKTOP_PREFIX = "STACKTOP:";
 // Space kept under the numbers when a note line tucks up (see tuckSlots):
 // about what a plain line leaves under its numbers.
 const TUCK_KEEP = 6;
+// How far a notes line tucks up under a line with a fraction in front of x.
+const FRACTION_NOTE_TUCK = 10;
 // ...and when an answer on that line sits under the fractions above.
 const TUCK_KEEP_ANSWER = 14;
 // Room between an answer and the box drawn around it.
@@ -1382,11 +1401,14 @@ function RowConnector({
   );
 }
 
+type DiagramGroup = { lead?: string; coefficient: string; term1: string; term2: string; arcsShown: 0 | 1 | 2 };
+
 function DistributeDiagram({
   coefficient,
   term1,
   term2,
   arcsShown,
+  chain,
   prefix,
   prefixColor,
   suffix,
@@ -1398,6 +1420,8 @@ function DistributeDiagram({
   term1: string;
   term2: string;
   arcsShown: 0 | 1 | 2;
+  // more sets of parentheses after the first, on the same line
+  chain?: DiagramGroup[];
   prefix?: string;
   prefixColor?: string;
   suffix?: string;
@@ -1405,74 +1429,52 @@ function DistributeDiagram({
   parenColor?: string;
   // Overrides this diagram's own arcsShown-based padding - needed when
   // TWO diagrams share the same row (a left-side and a right-side one,
-  // both simultaneously visible): each computes arcsShown independently
-  // for ITS OWN arcs, so without this, the one further behind pads
-  // less, and its text sits at a different baseline than the other -
-  // the whole row needs the same padding as whichever diagram (or
-  // neither) currently has the most arcs shown.
+  // both simultaneously visible): the whole row needs the same padding as
+  // whichever diagram (or neither) currently has the most arcs shown.
   forcePaddingTop?: number;
 }) {
+  const groups: DiagramGroup[] = [{ coefficient, term1, term2, arcsShown }, ...(chain ?? [])];
+  const anyShown = groups.some((g) => g.arcsShown > 0);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const coefRef = useRef<HTMLSpanElement | null>(null);
-  const term1Ref = useRef<HTMLSpanElement | null>(null);
-  const term2Ref = useRef<HTMLSpanElement | null>(null);
-  const [measured, setMeasured] = useState<{ coefX: number; term1X: number; term2X: number; y: number } | null>(
-    null
-  );
+  // three refs per group: the number in front and the two terms inside
+  const refs = useRef<(HTMLSpanElement | null)[]>([]);
+  const [measured, setMeasured] = useState<{ coefX: number; term1X: number; term2X: number; y: number }[] | null>(null);
+  const key = JSON.stringify(groups.map((g) => [g.lead, g.coefficient, g.term1, g.term2, g.arcsShown]));
 
-  // Measures the REAL rendered position of each token - this is safe here
-  // (unlike trying to anchor to a grid cell) because each token is its
-  // own separately-rendered KaTeX element from the start, not a substring
-  // pulled out of one merged blob. Real KaTeX also means "\," and any
-  // other KaTeX syntax in term2 renders correctly instead of showing up
-  // as literal backslash-text, and the font matches the grid exactly
-  // since it's the same InlineMath component rendering both.
-  // arcsShown is ALSO a dependency, not just the token strings - the
-  // container's own paddingTop changes (0 before any arc, 34 once one is
-  // shown), which shifts the text's actual Y position in the DOM. Without
-  // re-measuring here, the arc math keeps using the stale pre-padding Y
-  // coordinate, drawing arcs disconnected from where the text now sits.
-  // forcePaddingTop is the same reasoning, one level removed: when a
-  // sibling diagram on the same row forces this one's padding to match
-  // its own (larger) value, that ALSO shifts this text's actual Y
-  // position, even though this diagram's own arcsShown didn't change.
+  // Measures the real rendered position of each token (each is its own
+  // KaTeX element). Re-measured when the padding changes (arcs appearing
+  // move the text down).
   useLayoutEffect(() => {
-    if (!containerRef.current || !coefRef.current || !term1Ref.current || !term2Ref.current) {
-      setMeasured(null);
-      return;
+    const box = containerRef.current;
+    if (!box) return;
+    const c = box.getBoundingClientRect();
+    const out: { coefX: number; term1X: number; term2X: number; y: number }[] = [];
+    for (let i = 0; i < groups.length; i++) {
+      const [a, b, d] = [refs.current[i * 3], refs.current[i * 3 + 1], refs.current[i * 3 + 2]];
+      if (!a || !b || !d) {
+        setMeasured(null);
+        return;
+      }
+      const [ra, rb, rd] = [a.getBoundingClientRect(), b.getBoundingClientRect(), d.getBoundingClientRect()];
+      out.push({ coefX: ra.left + ra.width / 2 - c.left, term1X: rb.left + rb.width / 2 - c.left, term2X: rd.left + rd.width / 2 - c.left, y: ra.top - c.top });
     }
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const coefRect = coefRef.current.getBoundingClientRect();
-    const term1Rect = term1Ref.current.getBoundingClientRect();
-    const term2Rect = term2Ref.current.getBoundingClientRect();
-    setMeasured({
-      coefX: coefRect.left + coefRect.width / 2 - containerRect.left,
-      term1X: term1Rect.left + term1Rect.width / 2 - containerRect.left,
-      term2X: term2Rect.left + term2Rect.width / 2 - containerRect.left,
-      y: coefRect.top - containerRect.top,
-    });
-  }, [coefficient, term1, term2, arcsShown, forcePaddingTop]);
+    if (JSON.stringify(out) !== JSON.stringify(measured)) setMeasured(out);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, forcePaddingTop]);
 
   const arcGap = 10;
-  let arc1Path = "";
-  let arc2Path = "";
-  if (measured) {
-    const dist1 = Math.abs(measured.term1X - measured.coefX);
+  const arcs = (m: { coefX: number; term1X: number; term2X: number; y: number }) => {
+    const dist1 = Math.abs(m.term1X - m.coefX);
     const height1 = 8 + dist1 * 0.22;
-    const top1 = measured.y - arcGap - height1;
-    const mid1 = (measured.coefX + measured.term1X) / 2;
-    arc1Path = `M ${measured.coefX} ${measured.y - arcGap} Q ${mid1} ${top1} ${measured.term1X} ${measured.y - arcGap}`;
-
-    const dist2 = Math.abs(measured.term2X - measured.coefX);
-    // Guaranteed clearance over arc 1, not just independently scaled by
-    // distance - two arcs sharing a start point will otherwise cross
-    // unless the taller one is forced to clear the shorter one's peak by
-    // a fixed margin.
+    const mid1 = (m.coefX + m.term1X) / 2;
+    const a1 = `M ${m.coefX} ${m.y - arcGap} Q ${mid1} ${m.y - arcGap - height1} ${m.term1X} ${m.y - arcGap}`;
+    const dist2 = Math.abs(m.term2X - m.coefX);
+    // the longer arc always clears the shorter one's peak
     const height2 = Math.max(height1 + 16, 8 + dist2 * 0.22);
-    const top2 = measured.y - arcGap - height2;
-    const mid2 = (measured.coefX + measured.term2X) / 2;
-    arc2Path = `M ${measured.coefX} ${measured.y - arcGap} Q ${mid2} ${top2} ${measured.term2X} ${measured.y - arcGap}`;
-  }
+    const mid2 = (m.coefX + m.term2X) / 2;
+    const a2 = `M ${m.coefX} ${m.y - arcGap} Q ${mid2} ${m.y - arcGap - height2} ${m.term2X} ${m.y - arcGap}`;
+    return [a1, a2];
+  };
 
   return (
     <div
@@ -1480,57 +1482,63 @@ function DistributeDiagram({
       style={{
         position: "relative",
         display: "inline-block",
-        paddingTop: forcePaddingTop !== undefined ? forcePaddingTop : arcsShown > 0 ? 34 : 0,
+        paddingTop: forcePaddingTop !== undefined ? forcePaddingTop : anyShown ? 34 : 0,
       }}
     >
       {measured && (
         <svg
-          style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            width: "100%",
-            height: "100%",
-            overflow: "visible",
-            pointerEvents: "none",
-          }}
+          style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}
         >
           <defs>
             <marker id="distribute-diagram-head" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto">
               <path d="M0,0 L5,2.5 L0,5 Z" fill="var(--ink-soft)" />
             </marker>
           </defs>
-          {arcsShown >= 1 && (
-            <path d={arc1Path} stroke="var(--ink-soft)" strokeWidth={1.3} fill="none" markerEnd="url(#distribute-diagram-head)" />
-          )}
-          {arcsShown >= 2 && (
-            <path d={arc2Path} stroke="var(--ink-soft)" strokeWidth={1.3} fill="none" markerEnd="url(#distribute-diagram-head)" />
-          )}
+          {groups.map((g, i) => {
+            const m = measured[i];
+            if (!m) return null;
+            const [a1, a2] = arcs(m);
+            return (
+              <g key={i}>
+                {g.arcsShown >= 1 && <path d={a1} stroke="var(--ink-soft)" strokeWidth={1.3} fill="none" markerEnd="url(#distribute-diagram-head)" />}
+                {g.arcsShown >= 2 && <path d={a2} stroke="var(--ink-soft)" strokeWidth={1.3} fill="none" markerEnd="url(#distribute-diagram-head)" />}
+              </g>
+            );
+          })}
         </svg>
       )}
       <div style={{ display: "flex", alignItems: "baseline", fontSize: 20 }}>
         {prefix && (
-          <span style={{ marginRight: 4, color: prefixColor }}>
+          <span style={{ marginRight: ownsRightSpace(prefix) ? 0 : 4, color: prefixColor }}>
             <InlineMath math={prefix} />
           </span>
         )}
-        <span ref={coefRef}>
-          <InlineMath math={coefficient} />
-        </span>
-        <span style={{ color: parenColor }}>
-          <InlineMath math="(" />
-        </span>
-        <span ref={term1Ref}>
-          <InlineMath math={term1} />
-        </span>
-        <span ref={term2Ref} style={{ marginLeft: 4 }}>
-          <InlineMath math={term2} />
-        </span>
-        <span style={{ color: parenColor }}>
-          <InlineMath math=")" />
-        </span>
+        {groups.map((g, i) => (
+          <Fragment key={i}>
+            {g.lead && (
+              <span style={{ marginLeft: ownsLeftSpace(g.lead) ? 0 : 4, marginRight: ownsRightSpace(g.lead) ? 0 : 4, color: prefixColor }}>
+                <InlineMath math={g.lead} />
+              </span>
+            )}
+            <span ref={(el) => { refs.current[i * 3] = el; }}>
+              <InlineMath math={g.coefficient} />
+            </span>
+            <span style={{ color: parenColor }}>
+              <InlineMath math="(" />
+            </span>
+            <span ref={(el) => { refs.current[i * 3 + 1] = el; }}>
+              <InlineMath math={g.term1} />
+            </span>
+            <span ref={(el) => { refs.current[i * 3 + 2] = el; }} style={{ marginLeft: 4 }}>
+              <InlineMath math={g.term2} />
+            </span>
+            <span style={{ color: parenColor }}>
+              <InlineMath math=")" />
+            </span>
+          </Fragment>
+        ))}
         {suffix && (
-          <span style={{ marginLeft: 4, color: suffixColor }}>
+          <span style={{ marginLeft: ownsLeftSpace(suffix) ? 0 : 4, color: suffixColor }}>
             <InlineMath math={suffix} />
           </span>
         )}
@@ -1539,11 +1547,22 @@ function DistributeDiagram({
   );
 }
 
+// A piece written with "{}" at its edge ("{}+ 4x", "5 - {}") carries its
+// own TeX spacing around the sign there, so it gets no extra margin.
+function ownsLeftSpace(tex: string): boolean {
+  return tex.startsWith("{}");
+}
+function ownsRightSpace(tex: string): boolean {
+  return tex.endsWith("{}") || tex.endsWith("\\:");
+}
+
 type ComputedAnnotation = {
   coefficient: string;
   term1: string;
   term2: string;
-  arcsShown: 0 | 1 | 2;
+  arcsShown: 0 | 1 | 2; // the most arcs any of its groups shows (sets the padding)
+  ownArcs?: 0 | 1 | 2; // the first group's own, when there's a chain
+  chain?: DiagramGroup[];
   termCols: [number, number];
   targetSlotId: string;
   prefix?: string;
@@ -1587,6 +1606,47 @@ function boldWrapCell(math: string): string {
 function totalGridColumns(eqColumnIndex: number, columnCountOverride?: number): number {
   if (columnCountOverride !== undefined) return columnCountOverride;
   return eqColumnIndex === 1 ? 4 : eqColumnIndex + 2;
+}
+
+// "x = -6": a variable worked out to a number (an answer in a system).
+function isSolvedValue(cells: readonly string[]): boolean {
+  const parts = cells.filter((c) => !isBlankCell(c)).map((c) => c.replace(/\\hspace\{[^}]*\}/g, "").replace(/\s+/g, ""));
+  return parts.length === 3 && /^[a-z]$/.test(parts[0]) && parts[1] === "=" && /^[+-]?(\d+(\.\d+)?|\\[dt]?frac\{\d+\}\{\d+\})$/.test(parts[2]);
+}
+
+// A box around each answer line in the systems grid (cells tagged with
+// data-box-key), measured from the page and drawn on top, taking no space.
+function AnswerBoxes({ containerRef }: { containerRef: { current: HTMLDivElement | null } }) {
+  const [boxes, setBoxes] = useState<{ left: number; top: number; width: number; height: number }[]>([]);
+  useLayoutEffect(() => {
+    const box = containerRef.current;
+    if (!box) return;
+    const g = box.getBoundingClientRect();
+    const byKey = new Map<string, DOMRect[]>();
+    box.querySelectorAll<HTMLElement>("[data-box-key]").forEach((el) => {
+      const key = el.getAttribute("data-box-key")!;
+      const rects = Array.from(el.querySelectorAll<HTMLElement>(".katex-html .mord, .katex-html .mbin, .katex-html .mrel, .katex-html .mopen, .katex-html .mclose, .katex-html .mpunct, .katex-html .frac-line"))
+        .filter((k) => !k.closest(".pstrut, .strut"))
+        .map((k) => k.getBoundingClientRect())
+        .filter((b) => b.width > 0);
+      byKey.set(key, [...(byKey.get(key) ?? []), ...rects]);
+    });
+    const next = [...byKey.values()].filter((r) => r.length).map((rects) => {
+      const left = Math.min(...rects.map((b) => b.left)) - g.left - BOX_PAD_X;
+      const right = Math.max(...rects.map((b) => b.right)) - g.left + BOX_PAD_X;
+      const top = Math.min(...rects.map((b) => b.top)) - g.top - BOX_PAD_Y;
+      const bottom = Math.max(...rects.map((b) => b.bottom)) - g.top + BOX_PAD_Y;
+      return { left: Math.round(left), top: Math.round(top), width: Math.round(right - left), height: Math.round(bottom - top) };
+    });
+    if (JSON.stringify(next) !== JSON.stringify(boxes)) setBoxes(next);
+  });
+  return (
+    <>
+      {boxes.map((b, i) => (
+        <div key={`ab-${i}`} aria-hidden="true" style={{ position: "absolute", left: b.left, top: b.top, width: b.width, height: b.height, border: "1.5px solid var(--ink)", borderRadius: 4, pointerEvents: "none" }} />
+      ))}
+    </>
+  );
 }
 
 function EquationGrid({
@@ -1752,7 +1812,8 @@ function EquationGrid({
         color: string,
         slotIdForRow: string | undefined,
         marginBottom?: number,
-        padTop: number = 0
+        padTop: number = 0,
+        boxKey?: string
       ) {
         const isBold = !!slotIdForRow && slotIdForRow === boldSlotId;
         return cells.map((cellValue, colIndex) => {
@@ -1766,6 +1827,7 @@ function EquationGrid({
               <div
                 key={`${rowKey}-${colIndex}`}
                 data-row-slot={slotIdForRow}
+                data-box-key={boxKey}
                 style={{
                   textAlign: "center",
                   color: "var(--ink-soft)",
@@ -1779,7 +1841,7 @@ function EquationGrid({
             );
           }
           return (
-            <div key={`${rowKey}-${colIndex}`} data-row-slot={slotIdForRow} style={style}>
+            <div key={`${rowKey}-${colIndex}`} data-row-slot={slotIdForRow} data-box-key={boxKey} style={style}>
               <Cell math={displayValue} color={color} align={alignFor(colIndex)} />
             </div>
           );
@@ -1798,13 +1860,14 @@ function EquationGrid({
         annotations: ComputedAnnotation[],
         slotIdForRow: string | undefined,
         marginBottom?: number,
-        reserveArcSpace: boolean = false
+        reserveArcSpace: boolean = false,
+        boxKey?: string
       ) {
         // A row that will EVER carry distribute arrows keeps their 34px of
         // headroom from the moment it appears, so the arrows showing up
         // later never push this row (and everything below it) down.
         if (annotations.length === 0) {
-          return renderCells(cells, rowKey, color, slotIdForRow, marginBottom, reserveArcSpace ? 34 : 0);
+          return renderCells(cells, rowKey, color, slotIdForRow, marginBottom, reserveArcSpace ? 34 : 0, boxKey);
         }
         // Multiple annotations can be simultaneously active on the same
         // row now (e.g. both a left-side and a right-side distribute
@@ -1833,7 +1896,8 @@ function EquationGrid({
                   coefficient={annotation.coefficient}
                   term1={annotation.term1}
                   term2={annotation.term2}
-                  arcsShown={annotation.arcsShown}
+                  arcsShown={annotation.ownArcs ?? annotation.arcsShown}
+                  chain={annotation.chain}
                   prefix={annotation.prefix}
                   prefixColor={annotation.prefixColor}
                   suffix={annotation.suffix}
@@ -1897,8 +1961,8 @@ function EquationGrid({
         }
 
         return [
-          ...renderCellsOrArrow(row.eq1, `${rowIndex}-eq1`, colorFor(row.eq1Highlight), eq1Ann ? [eq1Ann] : [], slotId, -8, !!arcReserveKeys?.has(`${slotId}|eq1`)),
-          ...renderCellsOrArrow(row.eq2, `${rowIndex}-eq2`, colorFor(row.eq2Highlight), eq2Ann ? [eq2Ann] : [], slotId, undefined, !!arcReserveKeys?.has(`${slotId}|eq2`)),
+          ...renderCellsOrArrow(row.eq1, `${rowIndex}-eq1`, colorFor(row.eq1Highlight), eq1Ann ? [eq1Ann] : [], slotId, -8, !!arcReserveKeys?.has(`${slotId}|eq1`), row.eq1Highlight === "success" ? `${slotId}-eq1` : undefined),
+          ...renderCellsOrArrow(row.eq2, `${rowIndex}-eq2`, colorFor(row.eq2Highlight), eq2Ann ? [eq2Ann] : [], slotId, undefined, !!arcReserveKeys?.has(`${slotId}|eq2`), row.eq2Highlight === "success" ? `${slotId}-eq2` : undefined),
         ];
       }
 
@@ -1916,7 +1980,7 @@ function EquationGrid({
       // renderCellsOrArrow renders each independently, at its own
       // column span.
       const matchingAnnotations = (distributeAnnotations ?? []).filter((a) => a.targetSlotId === slotId);
-      return renderCellsOrArrow(row.cells, `${rowIndex}`, color, matchingAnnotations, slotId, row.marginBottom, !!arcReserveKeys?.has(`${slotId}|`));
+      return renderCellsOrArrow(row.cells, `${rowIndex}`, color, matchingAnnotations, slotId, row.marginBottom, !!arcReserveKeys?.has(`${slotId}|`), row.highlight === "success" || isSolvedValue(row.cells) ? `${slotId}` : undefined);
     });
   }
 
@@ -1973,6 +2037,7 @@ function EquationGrid({
     return (
       <div style={{ overflowX: "auto", width: "100%", paddingTop: 14, paddingBottom: 4 }}>
         <div ref={outerRef} style={{ position: "relative" }}>
+          <AnswerBoxes containerRef={outerRef} />
           {connectorsToRender.map((rc, i) => (
             <RowConnector key={i} containerRef={outerRef} fromSlotId={rc.fromSlotId} toSlotId={rc.toSlotId} />
           ))}
@@ -2043,6 +2108,7 @@ function EquationGrid({
         }}
       >
         {renderSizingProbe(fullRows)}
+        <AnswerBoxes containerRef={outerRef} />
         {connectorsToRender.map((rc, i) => (
           <RowConnector key={i} containerRef={outerRef} fromSlotId={rc.fromSlotId} toSlotId={rc.toSlotId} />
         ))}
@@ -2412,6 +2478,14 @@ function AnchoredEquation({
       const room = bottom - numBottom - keep;
       if (room > 0) next[id] = Math.round(room);
     }
+    // A notes line ("+2   +2") under a line with a fraction in front of x
+    // sits as close under that line as it would under a plain line: the tall
+    // fraction would otherwise push it further down. (A fixed amount, the
+    // same on every step, so nothing moves.)
+    slotOrderAll.forEach((id, i) => {
+      if (i === 0 || tuckSlots.includes(id) || !isAnnotationSlot(id)) return;
+      if (fracCoefSlot(slotOrderAll[i - 1])) next[id] = FRACTION_NOTE_TUCK;
+    });
     const same = Object.keys(next).length === Object.keys(tuck).length && Object.entries(next).every(([k, v]) => tuck[k] === v);
     if (!same) setTuck(next);
     // A notes line that can't tuck up as a whole (an answer on it has to
@@ -2437,7 +2511,13 @@ function AnchoredEquation({
   // Answers drawn in a box (GridRow.boxCols): a black outline around the
   // answer's cells, measured from the page and drawn on top - it never
   // takes up space, so nothing around it moves.
-  const hasBoxes = slotOrderAll.some((id) => (slotVersions[id] ?? []).some((r) => r.boxCols?.length));
+  // Every answer is boxed: a final (success) line with no boxes of its own
+  // gets one box around the whole line; a caption answer ("No Solution")
+  // gets a box around its words.
+  const boxColsOf = (r: GridRow): number[][] | undefined =>
+    r.boxCols?.length ? r.boxCols : r.highlight === "success" && r.caption === undefined && r.cells.length ? [r.cells.map((_c, i) => i)] : undefined;
+  const boxesCaption = (r: GridRow) => r.highlight === "success" && r.caption !== undefined && r.caption !== "";
+  const hasBoxes = slotOrderAll.some((id) => (slotVersions[id] ?? []).some((r) => boxColsOf(r) || boxesCaption(r)));
   const [boxes, setBoxes] = useState<{ left: number; top: number; width: number; height: number }[]>([]);
   useLayoutEffect(() => {
     const grid = gridRef.current;
@@ -2446,9 +2526,19 @@ function AnchoredEquation({
     const next: { left: number; top: number; width: number; height: number }[] = [];
     rows.forEach((r, i) => {
       const slot = slotOrderAll[i];
-      if (!r.boxCols?.length || !slot) return;
+      if (!slot) return;
+      if (boxesCaption(r)) {
+        const cap = grid.querySelector<HTMLElement>(`[data-row-slot="${CSS.escape(slot)}"] [data-caption]`);
+        const b = cap?.getBoundingClientRect();
+        if (b && b.width > 0) {
+          next.push({ left: Math.round(b.left - g.left - BOX_PAD_X - 2), top: Math.round(b.top - g.top - BOX_PAD_Y), width: Math.round(b.width + 2 * BOX_PAD_X + 4), height: Math.round(b.height + 2 * BOX_PAD_Y) });
+        }
+        return;
+      }
+      const groups = boxColsOf(r);
+      if (!groups) return;
       const cellEls = Array.from(grid.querySelectorAll<HTMLElement>(`[data-row-slot="${CSS.escape(slot)}"][data-col]`));
-      for (const group of r.boxCols) {
+      for (const group of groups) {
         const rects = cellEls
           .filter((el) => group.includes(Number(el.getAttribute("data-col"))))
           // every visible piece of the math - letters, numbers, signs and
@@ -2710,6 +2800,14 @@ function AnchoredEquation({
     return prev === undefined || isConnector(cells[prev]);
   }
 
+  // A line with a fraction in front of a letter ("1/2 x + 3 = 8") lines its
+  // pieces up on their baseline, so the bottom of the x sits level with the
+  // bottom of the numbers beside it (centering them leaves the x a little
+  // high in some browsers, since the fraction is tall).
+  function fracCoefSlot(slotId: string): boolean {
+    return (slotVersions[slotId] ?? []).some((v) => v.cells.some((c) => /\\dfrac\{[^{}]*\}\{[^{}]*\}[a-zA-Z]/.test(c ?? "") && !/^[A-Z]+:/.test(c ?? "")));
+  }
+
   function SideBlock({
     group,
     side,
@@ -2756,9 +2854,11 @@ function AnchoredEquation({
     const absorbed = new Set<number>();
     for (const a of annotations) {
       const [c1, c2] = [Math.min(...a.termCols), Math.max(...a.termCols)];
-      if (cols.includes(c1) && cols.includes(c2)) {
+      // (the second column may be empty on every version of this line - a
+      // whole side written in one cell - and then takes no room at all)
+      if (cols.includes(c1)) {
         spanStart.set(c1, a);
-        absorbed.add(c2);
+        if (cols.includes(c2)) absorbed.add(c2);
       }
     }
     return (
@@ -2767,7 +2867,7 @@ function AnchoredEquation({
           display: "inline-grid",
           gridTemplateColumns: cols.length ? `repeat(${cols.length}, auto)` : "0px",
           columnGap: TEX_MED_SPACE,
-          alignItems: row?.baseline ? "baseline" : "center",
+          alignItems: row?.baseline || (slotId && fracCoefSlot(slotId)) ? "baseline" : "center",
         }}
       >
         {versions.flatMap((v, vi) =>
@@ -2840,13 +2940,14 @@ function AnchoredEquation({
                   data-row-slot={dataSlot}
                   // Against the "=" (the diagram can be a little narrower
                   // than the plain cells it replaces).
-                  style={{ gridRow: 1, gridColumn: `${i + 1} / span 2`, justifySelf: side === "left" ? "end" : "start" }}
+                  style={{ gridRow: 1, gridColumn: absorbed.has(cols[i + 1]) ? `${i + 1} / span 2` : i + 1, justifySelf: side === "left" ? "end" : "start" }}
                 >
                   <DistributeDiagram
                     coefficient={texSpacing(ann.coefficient)}
                     term1={texSpacing(ann.term1)}
                     term2={texSpacing(ann.term2)}
-                    arcsShown={ann.arcsShown}
+                    arcsShown={ann.ownArcs ?? ann.arcsShown}
+                    chain={ann.chain}
                     prefix={ann.prefix && texSpacing(ann.prefix)}
                     prefixColor={ann.prefixColor}
                     suffix={ann.suffix && texSpacing(ann.suffix)}
@@ -3076,7 +3177,7 @@ function AnchoredEquation({
           const reserve = arcReserveSlots.has(slotId) || distributeAnnotations.some((a) => a.targetSlotId === slotId && a.arcsShown > 0);
           const eqSym = row.cells[e] ?? "";
           return [
-            <div key={`${slotId}-l`} data-line={slotId} aria-hidden={hidden || undefined} style={{ ...hide, gridRow, gridColumn: 1, justifySelf: "end", marginBottom: mb, marginTop: tuck[slotId] ? -tuck[slotId] : undefined, paddingRight: loopGap(slotId) }}>
+            <div key={`${slotId}-l`} data-line={slotId} aria-hidden={hidden || undefined} style={{ ...hide, gridRow, gridColumn: 1, alignSelf: fracCoefSlot(slotId) ? "baseline" : undefined, justifySelf: "end", marginBottom: mb, marginTop: tuck[slotId] ? -tuck[slotId] : undefined, paddingRight: loopGap(slotId) }}>
               <SideBlock group={group} side="left" row={row} slotId={slotId} hidden={hidden} />
             </div>,
             <div
@@ -3085,7 +3186,7 @@ function AnchoredEquation({
               data-col={e}
               aria-hidden={hidden || undefined}
               data-line={slotId}
-              style={{ ...hide, gridRow, gridColumn: 2, textAlign: "center", color: "var(--ink-soft)", whiteSpace: "nowrap", paddingTop: reserve ? 34 : undefined, marginBottom: mb, marginTop: tuck[slotId] ? -tuck[slotId] : undefined }}
+              style={{ ...hide, gridRow, gridColumn: 2, alignSelf: fracCoefSlot(slotId) ? "baseline" : undefined, textAlign: "center", color: "var(--ink-soft)", whiteSpace: "nowrap", paddingTop: reserve ? 34 : undefined, marginBottom: mb, marginTop: tuck[slotId] ? -tuck[slotId] : undefined }}
             >
               {eqSym.startsWith("SPILL:")
                 ? (() => {
@@ -3116,7 +3217,7 @@ function AnchoredEquation({
                   : <InlineMath math={eqSym} />
                 : null}
             </div>,
-            <div key={`${slotId}-r`} data-line={slotId} aria-hidden={hidden || undefined} style={{ ...hide, gridRow, gridColumn: 3, justifySelf: "start", marginBottom: mb, marginTop: tuck[slotId] ? -tuck[slotId] : undefined, paddingLeft: loopGap(slotId) }}>
+            <div key={`${slotId}-r`} data-line={slotId} aria-hidden={hidden || undefined} style={{ ...hide, gridRow, gridColumn: 3, alignSelf: fracCoefSlot(slotId) ? "baseline" : undefined, justifySelf: "start", marginBottom: mb, marginTop: tuck[slotId] ? -tuck[slotId] : undefined, paddingLeft: loopGap(slotId) }}>
               <SideBlock group={group} side="right" row={row} slotId={slotId} hidden={hidden} />
             </div>,
           ];
@@ -3179,7 +3280,7 @@ export default function StepSolver({
   });
 
   useEffect(() => {
-    setInstance(generate());
+    setInstance(signChoices(generate()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -3312,18 +3413,7 @@ export default function StepSolver({
     steps: SolverStep[],
     eqColIdx: number
   ):
-    | {
-        coefficient: string;
-        term1: string;
-        term2: string;
-        arcsShown: 0 | 1 | 2;
-        termCols: [number, number];
-        targetSlotId: string;
-        prefix?: string;
-        prefixColor?: string;
-        suffix?: string;
-        suffixColor?: string;
-      }
+    | ComputedAnnotation
     | undefined {
     if (content.chooseStepId) {
       const chooseIdx = steps.findIndex((s) => s.stepId === content.chooseStepId);
@@ -3334,13 +3424,22 @@ export default function StepSolver({
     const secondId = content.secondTermStepId ?? "distribute_second_term";
     const idx1 = steps.findIndex((s) => s.stepId === firstId);
     const idx2 = steps.findIndex((s) => s.stepId === secondId);
-    let arcsShown: 0 | 1 | 2 = 0;
-    if (idx1 !== -1 && idx2 !== -1) {
-      if (stepIndex < idx1) arcsShown = 0;
-      else if (stepIndex === idx1) arcsShown = revealed ? 1 : 0;
-      else if (stepIndex === idx2) arcsShown = revealed ? 2 : 1;
-      else arcsShown = 2; // past both - stays at 2 regardless of later steps' own reveal state
-    }
+    const arcsFor = (idx1: number, idx2: number): 0 | 1 | 2 => {
+      if (idx1 === -1 || idx2 === -1) return 0;
+      if (stepIndex < idx1) return 0;
+      if (stepIndex === idx1) return revealed ? 1 : 0;
+      if (stepIndex < idx2) return 1;
+      if (stepIndex === idx2) return revealed ? 2 : 1;
+      return 2; // past both - stays at 2 regardless of later steps' own reveal state
+    };
+    const arcsShown = arcsFor(idx1, idx2);
+    const chain = content.chain?.map((g) => ({
+      lead: g.lead,
+      coefficient: g.coefficient,
+      term1: g.term1,
+      term2: g.term2,
+      arcsShown: arcsFor(steps.findIndex((s) => s.stepId === g.firstTermStepId), steps.findIndex((s) => s.stepId === g.secondTermStepId)),
+    }));
     // eqColumnIndex is 2 for expressionLeft (term cells at 0,1) or 1 for
     // expressionRight (term cells at 2,3) - see eqColumnIndexFor. This
     // only holds when there are exactly 2 term columns; content.termCols
@@ -3350,7 +3449,8 @@ export default function StepSolver({
       coefficient: content.coefficient,
       term1: content.term1,
       term2: content.term2,
-      arcsShown,
+      arcsShown: chain?.length ? (Math.max(arcsShown, ...chain.map((g) => g.arcsShown)) as 0 | 1 | 2) : arcsShown,
+      ...(chain?.length ? { chain, ownArcs: arcsShown } : {}),
       termCols,
       targetSlotId: content.targetSlotId ?? "__initial__",
       prefix: content.prefix,
@@ -3429,7 +3529,7 @@ export default function StepSolver({
   }
 
   function handleNewProblem() {
-    setInstance(generate());
+    setInstance(signChoices(generate()));
     setStepIndex(0);
     setSelected(null);
     setRevealed(false);
@@ -3674,7 +3774,7 @@ export default function StepSolver({
                       {isGraph ? (
                         <GraphFromText text={choice.text} markerId={`probe-graph-${si}-${ci}`} />
                       ) : (
-                        <MixedText content={choice.text} />
+                        <MixedText content={autoMath(choice.text)} />
                       )}
                     </div>
                   );
@@ -3771,7 +3871,7 @@ export default function StepSolver({
                     {isGraph ? (
                       <GraphFromText text={choice.text} markerId={`graph-arrow-${i}`} />
                     ) : (
-                      <MixedText content={choice.text} />
+                      <MixedText content={autoMath(choice.text)} />
                     )}
                   </button>
                 );

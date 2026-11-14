@@ -88,6 +88,15 @@ export function buildFractionSolverInstance(
   const cancelRow: GridRow = {
     cells: assembleRow(cancelExpr1, cancelExpr2, cancelDisplay, orientation, ""),
   };
+  // Crossed-out versions, shown once the constants are confirmed to make 0:
+  // the constant in the problem and its opposite written under it.
+  const mark = (t: string) => `MARKEDTERM:${t}`;
+  const initialRowMarked: GridRow = {
+    cells: assembleRow(bIsSecond ? exprTerm1 : mark(exprTerm1), bIsSecond ? mark(exprTerm2) : exprTerm2, renderConstant(rhs), orientation),
+  };
+  const cancelRowMarked: GridRow = {
+    cells: assembleRow(bIsSecond ? BLANK : mark(cancelDisplay), bIsSecond ? mark(cancelDisplay) : BLANK, cancelDisplay, orientation, ""),
+  };
 
   const simplifiedRhs = rhs - b; // = n * k, by construction
 
@@ -112,10 +121,19 @@ export function buildFractionSolverInstance(
     ? `(${reciprocal})(${simplifiedRhs})`
     : `(${simplifiedRhs})(${reciprocal})`;
 
-  const reciprocalExpr1 = bIsSecond ? multipliedVarTerm : BLANK;
-  const reciprocalExpr2 = bIsSecond ? BLANK : multipliedVarTerm;
+  // drawn the same way as its crossed-out version (below), so nothing
+  // moves when the crosses appear
+  const plainVarTerm = `MARKEDRECIP:${exprIsLeftOfEquals ? "L" : "R"}\u0006${n < 0 ? "-" : ""}${d}\u0006${Math.abs(n)}\u0006${n < 0 ? "-" : ""}${Math.abs(n)}\u0006${d}\u0006${variableSymbol}\u0006plain`;
+  const reciprocalExpr1 = bIsSecond ? plainVarTerm : BLANK;
+  const reciprocalExpr2 = bIsSecond ? BLANK : plainVarTerm;
   const reciprocalRow: GridRow = {
     cells: assembleRow(reciprocalExpr1, reciprocalExpr2, multipliedConstant, orientation),
+  };
+  // ...and with the coefficient and its reciprocal crossed out (they make 1)
+  const recipSign = n < 0 ? "-" : "";
+  const markedVarTerm = `MARKEDRECIP:${exprIsLeftOfEquals ? "L" : "R"}\u0006${recipSign}${d}\u0006${Math.abs(n)}\u0006${recipSign}${Math.abs(n)}\u0006${d}\u0006${variableSymbol}`;
+  const reciprocalRowMarked: GridRow = {
+    cells: assembleRow(bIsSecond ? markedVarTerm : BLANK, bIsSecond ? BLANK : markedVarTerm, multipliedConstant, orientation),
   };
 
   // Step 3: final answer.
@@ -181,7 +199,10 @@ export function buildFractionSolverInstance(
   ]);
   const cancelConstant: SolverStep = {
     stepId: "cancel_constant",
-    rowUpdates: [],
+    rowUpdates: [
+      { slotId: "__initial__", row: initialRowMarked },
+      { slotId: "cancel_annotation", row: cancelRowMarked },
+    ],
     prompt: `What is ${constantIsPositive ? absB : -absB} ${constOpSym} ${absB}?`,
     choices: shuffle([
       { text: "0", isCorrect: true, misconceptionTag: null },
@@ -248,7 +269,7 @@ export function buildFractionSolverInstance(
   ]);
   const confirmCoefficientOne: SolverStep = {
     stepId: "confirm_coefficient_one",
-    rowUpdates: [{ slotId: "coefficient_confirmed", row: coeffConfirmedRow }],
+    rowUpdates: [{ slotId: "simplified", row: reciprocalRowMarked }, { slotId: "coefficient_confirmed", row: coeffConfirmedRow }],
     prompt: `What is ${coefficientKatex} \u00d7 ${reciprocalKatex}?`,
     choices: shuffle([
       { text: "1", isCorrect: true, misconceptionTag: null },
