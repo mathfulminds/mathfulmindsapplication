@@ -84,7 +84,9 @@ export default function YourProblemPage() {
   function solve(input: string) {
     if (isEmpty(input)) return;
     const result: RouteResult =
-      example && input === example.latex
+      // (a fractions example is routed like a typed problem, so both of its
+      // methods are offered)
+      example && input === example.latex && example.skill.id !== "clearFractions"
         ? {
             ok: true,
             latex: input,

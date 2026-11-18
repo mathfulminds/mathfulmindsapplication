@@ -52,3 +52,33 @@ button {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Fractions inside questions, answer choices and messages: the bar is
+   drawn thick enough to see clearly at text size (KaTeX's own is a
+   hairline there). */
+.mixed-math .katex .frac-line {
+  border-bottom-width: 1.5px !important;
+  min-height: 1.5px;
+}
+
+/* A number in the work that can be clicked to switch its form (fraction,
+   mixed number, decimal). */
+[data-nf] {
+  cursor: pointer;
+  border-radius: 4px;
+}
+[data-nf]:hover {
+  background: rgba(46, 111, 163, 0.14);
+}
+
+/* The bar over the repeating digits of a decimal (1.6 with a bar = 1.666...):
+   given its full width (without this it can collapse to nothing) and drawn
+   thick enough to see clearly (KaTeX's own is a hairline). */
+/* (written to outrank the hairline rule above for every KaTeX line) */
+span.katex span.overline span.overline-line {
+  display: inline-block;
+  width: 100%;
+  border-bottom-style: solid;
+  border-bottom-width: 1.5px !important;
+  min-height: 1.5px;
+}

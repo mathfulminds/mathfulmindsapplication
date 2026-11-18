@@ -39,6 +39,10 @@ function dedupNumeric(
   return out;
 }
 
+import { planLinearEquation } from "./linearGeneral";
+import { validateInstance, blockingIssues } from "../input/validateInstance";
+import type { SurfaceTerm } from "../input/parseEquation";
+
 export type Mode = "fraction" | "decimal";
 
 interface NonIntegerInstance {
@@ -487,5 +491,18 @@ export function buildNonIntegerSolverInstance(
 
 export function generateNonIntegerInstance(forcedMode?: Mode): SolverInstance {
   const eq = generateNonIntegerEquation(forcedMode);
+  // The number in front of x is a whole number, so it's undone by dividing
+  // by it - never by multiplying by its reciprocal. These go through the
+  // general planner: a problem made of whole numbers ("3x + 12 = 7") is
+  // solved the usual way with the answer left as a fraction, and one with a
+  // fraction in it ("8x + 5 = 3/2") has its denominators cleared first.
+  if (eq.mode === "fraction") {
+    const num = (f: Fraction): SurfaceTerm => ({ kind: "const", value: f, style: f.den === 1 ? "int" : "fraction" });
+    const expr: SurfaceTerm[] = [{ kind: "var", name: "x", coef: fromInt(eq.a), form: "multiply", coefStyle: "int" }, num(eq.b)];
+    if (!eq.variableFirst) expr.reverse();
+    const other: SurfaceTerm[] = [num(eq.rhs)];
+    const plan = eq.orientation === "expressionLeft" ? planLinearEquation(expr, other, "x") : planLinearEquation(other, expr, "x");
+    if (plan && blockingIssues(validateInstance(plan.instance, ["x"])).length === 0) return plan.instance;
+  }
   return buildNonIntegerSolverInstance(eq);
 }

@@ -1,4 +1,7 @@
 import type { SolverInstance, SolverStep, Choice, GridRow } from "./types";
+import { planLinearEquation } from "./linearGeneral";
+import { validateInstance, blockingIssues } from "../input/validateInstance";
+import type { SurfaceTerm } from "../input/parseEquation";
 import {
   BLANK,
   Orientation,
@@ -656,5 +659,19 @@ export function buildNonIntegerSolverInstance(
 
 export function generateNonIntegerInequalityInstance(forcedMode?: Mode): SolverInstance {
   const ineq = generateNonIntegerInequality(forcedMode);
+  // The number in front of x is a whole number, so it's undone by dividing
+  // by it - never by multiplying by its reciprocal. These go through the
+  // general planner: a problem made of whole numbers ("3x + 12 = 7") is
+  // solved the usual way with the answer left as a fraction, and one with a
+  // fraction in it ("8x + 5 = 3/2") has its denominators cleared first.
+  if (ineq.mode === "fraction") {
+    const num = (f: Fraction): SurfaceTerm => ({ kind: "const", value: f, style: f.den === 1 ? "int" : "fraction" });
+    const expr: SurfaceTerm[] = [{ kind: "var", name: "x", coef: fromInt(ineq.a), form: "multiply", coefStyle: "int" }, num(ineq.b)];
+    if (!ineq.variableFirst) expr.reverse();
+    const other: SurfaceTerm[] = [num(ineq.rhs)];
+    const plan =
+      ineq.orientation === "expressionLeft" ? planLinearEquation(expr, other, "x", ineq.origSymbol) : planLinearEquation(other, expr, "x", ineq.origSymbol);
+    if (plan && blockingIssues(validateInstance(plan.instance, ["x"])).length === 0) return plan.instance;
+  }
   return buildNonIntegerSolverInstance(ineq);
 }

@@ -25,12 +25,21 @@ import { makeFraction, fromInt, addFraction, mulFraction, divFraction, negFracti
 // ---------- public types ----------
 
 export type Relation = "=" | "<" | ">" | "<=" | ">=";
-export type NumStyle = "int" | "decimal" | "fraction";
+// mixed: a mixed number, "2 1/2" (a whole number followed by a fraction)
+export type NumStyle = "int" | "decimal" | "fraction" | "mixed";
+// A mixed number's parts as written, all positive: 2 1/2 -> 2, 1, 2. (The
+// term's sign is in its value.)
+export interface MixedNumber {
+  whole: number;
+  num: number;
+  den: number;
+}
 
 export interface ConstTerm {
   kind: "const";
   value: Fraction;
   style: NumStyle;
+  mixed?: MixedNumber; // style "mixed" only
 }
 
 export interface VarTerm {
@@ -47,6 +56,7 @@ export interface VarTerm {
   // than on the divisor ("x/-4").
   divisor?: number;
   negatedNumerator?: boolean;
+  mixed?: MixedNumber; // coefStyle "mixed" only: "2 1/2 x"
 }
 
 export interface ParenTerm {
@@ -300,7 +310,7 @@ function tokenize(s: string): Token[] {
 // ---------- AST ----------
 
 type Node =
-  | { t: "num"; value: Fraction; style: "int" | "decimal"; raw: string }
+  | { t: "num"; value: Fraction; style: "int" | "decimal" | "mixed"; raw: string; mixed?: MixedNumber }
   | { t: "var"; name: string }
   | { t: "neg"; x: Node }
   | { t: "add"; terms: { sign: 1 | -1; node: Node }[] }
@@ -393,8 +403,39 @@ class Parser {
     return !!tok && (tok.t === "num" || tok.t === "var" || tok.t === "lparen" || tok.t === "lbrace" || tok.t === "frac");
   }
 
+  // A whole number followed straight away by a proper fraction is a mixed
+  // number: "2 1/2" or "2\frac{1}{2}" is two and a half, not 2 times 1/2.
+  // (Written with parentheses, "2(1/2)", it stays a multiplication.)
+  private mixedAfter(whole: Node): Node | null {
+    if (whole.t !== "num" || whole.style !== "int" || whole.value.num < 1) return null;
+    const t = this.tokens;
+    const p = this.pos;
+    const int = (k: number) => {
+      const tk = t[k];
+      return tk && tk.t === "num" && /^\d+$/.test(tk.raw) ? parseInt(tk.raw, 10) : null;
+    };
+    const slash = t[p + 1];
+    let n: number | null = null;
+    let d: number | null = null;
+    let used = 0;
+    if (t[p]?.t === "num" && slash?.t === "op" && slash.op === "/") {
+      n = int(p);
+      d = int(p + 2);
+      used = 3;
+    } else if (t[p]?.t === "frac" && t[p + 1]?.t === "lbrace" && t[p + 3]?.t === "rbrace" && t[p + 4]?.t === "lbrace" && t[p + 6]?.t === "rbrace") {
+      n = int(p + 2);
+      d = int(p + 5);
+      used = 7;
+    }
+    if (n === null || d === null || n < 1 || n >= d) return null;
+    this.pos += used;
+    const w = whole.value.num;
+    return { t: "num", value: makeFraction(w * d + n, d), style: "mixed", raw: `${w}\\frac{${n}}{${d}}`, mixed: { whole: w, num: n, den: d } };
+  }
+
   parseTerm(): Node {
     let node = this.parseFactor();
+    node = this.mixedAfter(node) ?? node;
     for (;;) {
       const tok = this.peek();
       if (tok && tok.t === "op" && tok.op === "*") {
@@ -565,12 +606,12 @@ function hasVar(n: Node): boolean {
 }
 
 // A plain signed number: 5, -5, (5), (-5), 2.5. Returns null otherwise.
-function asSimpleNumber(n: Node): { value: Fraction; style: "int" | "decimal" } | null {
+function asSimpleNumber(n: Node): { value: Fraction; style: "int" | "decimal" | "mixed"; mixed?: MixedNumber } | null {
   n = unwrapInvisible(n);
-  if (n.t === "num") return { value: n.value, style: n.style };
+  if (n.t === "num") return { value: n.value, style: n.style, ...(n.mixed ? { mixed: n.mixed } : {}) };
   if (n.t === "neg") {
     const inner = asSimpleNumber(n.x);
-    return inner ? { value: negFraction(inner.value), style: inner.style } : null;
+    return inner ? { ...inner, value: negFraction(inner.value) } : null;
   }
   if (n.t === "group") return asSimpleNumber(n.x);
   return null;
@@ -610,7 +651,7 @@ function classifyTerm(sign: 1 | -1, node: Node, allowParen: boolean): SurfaceTer
 
   if (!hasVar(node)) {
     const num = asSimpleNumber(node);
-    if (num) return { kind: "const", value: mulFraction(num.value, s), style: num.style };
+    if (num) return { kind: "const", value: mulFraction(num.value, s), style: num.style, ...(num.mixed ? { mixed: num.mixed } : {}) };
     const frac = asSimpleFraction(node);
     if (frac) return { kind: "const", value: mulFraction(frac, s), style: "fraction" };
     throw new UnsupportedShape("Some of the numbers are written as a calculation (like 3·4 or (2 + 5)). Work those out first, then type the simpler version.");
@@ -626,7 +667,7 @@ function classifyTerm(sign: 1 | -1, node: Node, allowParen: boolean): SurfaceTer
     if (name) {
       // 3x, 2.5x, (3)x
       const num = asSimpleNumber(f0);
-      if (num) return { kind: "var", name, coef: mulFraction(num.value, s), form: "multiply", coefStyle: num.style };
+      if (num) return { kind: "var", name, coef: mulFraction(num.value, s), form: "multiply", coefStyle: num.style, ...(num.mixed ? { mixed: num.mixed } : {}) };
       // (2/3)x, \frac{2}{3}x, 2/3x
       const frac = asSimpleFraction(f0);
       if (frac) return { kind: "var", name, coef: mulFraction(frac, s), form: "fraction", coefStyle: "fraction" };
@@ -1166,7 +1207,7 @@ export function parseInput(raw: string): ParseResult {
           variables,
           linear: { coefs: m.coefs, constant: m.c },
           usesDecimal: anyStyle(terms, (st) => st === "decimal"),
-          usesFraction: anyStyle(terms, (st) => st === "fraction"),
+          usesFraction: anyStyle(terms, (st) => st === "fraction" || st === "mixed"),
           latex: `${toLatex(left)} ${REL_LATEX[relation]} ${toLatex(right)} ${REL_LATEX[relation2]} ${toLatex(right2)}`,
           sandwich: { left: lo.value, right: hi.value, relation2 },
         };
@@ -1228,7 +1269,7 @@ export function parseInput(raw: string): ParseResult {
         variables,
         linear: { coefs: diff.coefs, constant: diff.c },
         usesDecimal: anyStyle(all, (st) => st === "decimal"),
-        usesFraction: anyStyle(all, (st) => st === "fraction"),
+        usesFraction: anyStyle(all, (st) => st === "fraction" || st === "mixed"),
         latex: `${toLatex(left)} ${REL_LATEX[relation]} ${toLatex(right)}`,
       };
     });

@@ -296,6 +296,11 @@ export interface SolverInstance {
   // Optional: a word problem shown above the work for the whole problem
   // (e.g. "What is 25% of 40?").
   problemText?: string;
+  // Optional: the student can click a number in the work that isn't whole
+  // to switch how it's written - fraction, mixed number or decimal (see
+  // lib/display/numberForms.ts). For problems worked with a calculator,
+  // where 9/2, 4 1/2 and 4.5 are all the same answer.
+  switchableNumbers?: boolean;
   // Optional: every line shares one set of columns, so a symbol in the
   // middle of a line (like a compound inequality's second sign) stays in the
   // same spot on every line. Lines usually size their own columns.

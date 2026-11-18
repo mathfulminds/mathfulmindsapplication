@@ -1,11 +1,14 @@
 "use client";
 
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent, ReactNode } from "react";
+import katex from "katex";
 import { InlineMath as KatexInlineMath } from "react-katex";
 import "katex/dist/katex.min.css";
 import { autoMath } from "@/lib/display/autoMath";
 import { signChoices } from "@/lib/display/signChoices";
+import { applyNumberForms, firstSwitchableNumber, formsOfNumber, lastSwitchableTag } from "@/lib/display/numberForms";
+import type { NumberForm } from "@/lib/display/numberForms";
 import type { DistributeVisual, GridRow, PairedGridRow, SolverInstance, SolverStep, SideList } from "@/lib/skills/types";
 import { moveTag } from "@/lib/skills/types";
 import { termTag } from "@/lib/skills/combiningExpressions";
@@ -979,6 +982,243 @@ function renderMarkedReciprocal(content: string, color: string): ReactNode {
 }
 
 
+// A term whose number in front is crossed out, the letter left alone:
+// "3/4 x" with the 3/4 crossed (it was divided by 3/4). The term itself is
+// drawn exactly as it was before (the same single piece of math), and the
+// cross is laid over an invisible copy of just the number - so nothing
+// moves when the cross appears.
+// Format: "MARKEDCOEF:{number}\u0006{rest}".
+const MARKEDCOEF_PREFIX = "MARKEDCOEF:";
+function renderMarkedCoef(content: string): ReactNode {
+  const [coef, rest = ""] = content.split(COEF_VAR_SEPARATOR);
+  // (a fraction is tall and narrow: its cross reaches a little further out
+  // on each side, so it's as easy to see as the one on the note under it)
+  const reach = coef.includes("\\dfrac") ? "0.18em" : "0em";
+  return (
+    <span style={{ position: "relative", display: "inline-block" }}>
+      <InlineMath math={`${coef}${rest}`} />
+      <span aria-hidden="true" style={{ position: "absolute", left: `-${reach}`, top: 0, pointerEvents: "none", whiteSpace: "nowrap" }}>
+        <XMark size="large">
+          <span style={{ visibility: "hidden", display: "inline-block", padding: `0 ${reach}` }}>
+            <InlineMath math={coef} />
+          </span>
+        </XMark>
+      </span>
+    </span>
+  );
+}
+
+// A piece of math drawn exactly as it was, with a red X laid over some of
+// the numbers in it - each X centered on that number's own digits. The
+// numbers are found in the drawn math and measured (the middle of the ink of
+// the digits, not of the box around them), so the math itself is untouched
+// and nothing moves when the X appears.
+//   "outside": the number written beside a fraction - the 3 in "(3) x/3"
+//   "bottom":  the number under the fraction's bar - the 3 in "x/3"
+type CrossTarget = "outside" | "bottom";
+function crossTargets(root: HTMLElement, which: CrossTarget): HTMLElement[] {
+  const digits = Array.from(root.querySelectorAll<HTMLElement>(".katex-html .mord")).filter((el) => el.childElementCount === 0 && /^\d+$/.test(el.textContent ?? ""));
+  const inFraction = (el: HTMLElement) => !!el.closest(".mfrac");
+  if (which === "outside") return digits.filter((el) => !inFraction(el));
+  const inside = digits.filter(inFraction);
+  const lowest = Math.max(...inside.map((el) => el.getBoundingClientRect().top));
+  return inside.filter((el) => el.getBoundingClientRect().top > lowest - 2);
+}
+// the vertical middle of the digits themselves in a run of text
+let inkCanvas: CanvasRenderingContext2D | null | undefined;
+function inkCenterY(el: HTMLElement): number {
+  const r = el.getBoundingClientRect();
+  if (inkCanvas === undefined) inkCanvas = document.createElement("canvas").getContext("2d");
+  const cs = getComputedStyle(el);
+  if (!inkCanvas) return r.top + r.height / 2;
+  inkCanvas.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  const m = inkCanvas.measureText(el.textContent ?? "");
+  const fontUp = m.fontBoundingBoxAscent;
+  const fontDown = m.fontBoundingBoxDescent;
+  if (!Number.isFinite(fontUp) || !Number.isFinite(fontDown) || !Number.isFinite(m.actualBoundingBoxAscent)) return r.top + r.height / 2;
+  const baseline = r.top + (r.height - (fontUp + fontDown)) / 2 + fontUp;
+  return baseline - (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2;
+}
+function CrossedMath({ math, cross }: { math: string; cross: CrossTarget[] }) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const [marks, setMarks] = useState<{ x: number; y: number; w: number }[]>([]);
+  const key = `${math}|${cross.join(",")}`;
+  useLayoutEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const measure = () => {
+      const box = root.getBoundingClientRect();
+      if (!box.width) return;
+      const round = (v: number) => Math.round(v * 2) / 2;
+      const next = cross
+        .map((which) => crossTargets(root, which))
+        .filter((els) => els.length > 0)
+        .map((els) => {
+          const rects = els.map((el) => el.getBoundingClientRect());
+          const left = Math.min(...rects.map((b) => b.left));
+          const right = Math.max(...rects.map((b) => b.right));
+          return { x: round((left + right) / 2 - box.left), y: round(inkCenterY(els[0]) - box.top), w: round(right - left) };
+        });
+      setMarks((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(root);
+    // (the math font may finish loading after the first measure)
+    document.fonts?.ready.then(measure).catch(() => {});
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return (
+    <span ref={ref} style={{ position: "relative", display: "inline-block" }}>
+      <InlineMath math={math} />
+      {marks.map((m, i) => (
+        // same X as XMark: two bars reaching 4px past the number on each side
+        <span key={i} aria-hidden="true" style={{ position: "absolute", left: m.x - m.w / 2 - 4, top: m.y, width: m.w + 8, height: 0, pointerEvents: "none" }}>
+          <span style={{ position: "absolute", left: 0, right: 0, top: -1.25, height: 2.5, background: "var(--coral)", transform: "rotate(-20deg)" }} />
+          <span style={{ position: "absolute", left: 0, right: 0, top: -1.25, height: 2.5, background: "var(--coral)", transform: "rotate(20deg)" }} />
+        </span>
+      ))}
+    </span>
+  );
+}
+
+// A fraction whose bottom number is crossed out: "x/3" with the 3 crossed
+// (it was multiplied by 3).
+// Format: "MARKEDDEN:{sign}\u0006{top}\u0006{bottom}".
+const MARKEDDEN_PREFIX = "MARKEDDEN:";
+function renderMarkedDen(content: string): ReactNode {
+  const [sign = "", top = "", den = ""] = content.split(COEF_VAR_SEPARATOR);
+  return <CrossedMath math={`${sign}\\dfrac{${top}}{${den}}`} cross={["bottom"]} />;
+}
+
+// "x/3" multiplied by 3, written "(3) x/3" (or "x/3 (3)" on the right side
+// of the "="), with both 3s crossed out.
+// Format: "MARKEDTIMES:{L|R}\u0006{number}\u0006{top}\u0006{bottom}".
+const MARKEDTIMES_PREFIX = "MARKEDTIMES:";
+function renderMarkedTimes(content: string): ReactNode {
+  const [side = "L", outer = "", top = "", den = ""] = content.split(COEF_VAR_SEPARATOR);
+  const frac = `\\dfrac{${top}}{${den}}`;
+  return <CrossedMath math={side === "L" ? `(${outer})${frac}` : `${frac}(${outer})`} cross={["outside", "bottom"]} />;
+}
+
+// Clearing fractions: one side of the line the LCD is written on. The LCD
+// and its parentheses hold their room from the start (unseen until the LCD
+// is found), so the line is the same size before and after and nothing moves.
+//   several terms: the side is wrapped, "6(x/3 + 1/2)", and as each product
+//     is found an arrow is drawn from the 6 to that term, in the headroom
+//     kept above the line (the distributive property);
+//   one term: nothing is distributed, so the LCD is written beside the term
+//     at the outer end of the side - "(6) x/3" on the left of the "=",
+//     "5(6)" on the right - with no arrow.
+// Format: "LCDWRAP:" + JSON { lcd, side: "L"|"R", single, on: the LCD is
+// showing, arrows: how many terms (from the left) have an arrow, tall: a
+// term is a fraction (tall parentheses), terms: [{ s: sign, b: the term, v:
+// written yet }] }.
+const LCDWRAP_PREFIX = "LCDWRAP:";
+function LcdWrap({ payload, color }: { payload: string; color: string }) {
+  const { lcd, side, single, on, arrows, tall, terms } = JSON.parse(payload) as {
+    lcd: string;
+    side: "L" | "R";
+    single: boolean;
+    on: boolean;
+    arrows: number;
+    tall: boolean;
+    terms: { s: string; b: string; v: boolean }[];
+  };
+  const boxRef = useRef<HTMLSpanElement | null>(null);
+  const lcdRef = useRef<HTMLSpanElement | null>(null);
+  const termRefs = useRef<(HTMLSpanElement | null)[]>([]);
+  // where each arrow starts and ends, measured from the drawn pieces
+  const [geo, setGeo] = useState<{ from: number; to: number[] } | null>(null);
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    if (!box || single) return;
+    const measure = () => {
+      const b = box.getBoundingClientRect();
+      const l = lcdRef.current?.getBoundingClientRect();
+      if (!b.width || !l) return;
+      const next = {
+        from: Math.round(l.left + l.width / 2 - b.left),
+        to: terms.map((_t, i) => {
+          const r = termRefs.current[i]?.getBoundingClientRect();
+          return r ? Math.round(r.left + r.width / 2 - b.left) : 0;
+        }),
+      };
+      setGeo((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(box);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payload]);
+  const hide = on ? undefined : ({ visibility: "hidden" } as const);
+  const termPieces = terms.map((t, i) => (
+    <span key={i} style={{ display: "inline-flex", alignItems: "baseline", visibility: t.v ? undefined : "hidden" }}>
+      {t.s && <InlineMath math={i === 0 ? t.s : `{}${t.s}{}`} />}
+      <span ref={(el) => { termRefs.current[i] = el; }}>
+        <InlineMath math={t.b} />
+      </span>
+    </span>
+  ));
+  if (single) {
+    // "(6)" beside the one term, at the outer end of its side. A negative
+    // term on the left gets parentheses of its own: "(6)(-x/3)".
+    const beside = (
+      <span style={hide}>
+        <InlineMath math={`(${lcd})`} />
+      </span>
+    );
+    const wrapTerm = side === "L" && terms[0]?.s === "-";
+    const paren = (tex: string) => (
+      <span style={hide}>
+        <InlineMath math={tall ? `\\bigg${tex}` : tex} />
+      </span>
+    );
+    return (
+      <span style={{ display: "inline-flex", alignItems: "baseline", color }}>
+        {side === "L" && beside}
+        {wrapTerm && paren("(")}
+        {termPieces}
+        {wrapTerm && paren(")")}
+        {side === "R" && beside}
+      </span>
+    );
+  }
+  const startY = -7;
+  return (
+    <span ref={boxRef} style={{ position: "relative", display: "inline-flex", alignItems: "baseline", color }}>
+      {on && geo && arrows > 0 && (
+        <svg aria-hidden="true" width="1" height="1" style={{ position: "absolute", left: 0, top: 0, overflow: "visible", pointerEvents: "none" }}>
+          {geo.to.slice(0, arrows).map((to, i) => {
+            // each arrow arcs a little higher than the one before it; its
+            // head is drawn along the arc's direction where it lands
+            const rise = 16 + 13 * i;
+            const mid = (geo.from + to) / 2;
+            const angle = (Math.atan2(rise, to - mid) * 180) / Math.PI;
+            return (
+              <g key={i}>
+                <path d={`M ${geo.from} ${startY} Q ${mid} ${startY - rise} ${to} ${startY}`} stroke="var(--ink-soft)" strokeWidth={1.3} fill="none" />
+                <polygon points="0,0 -6.5,-2.8 -6.5,2.8" fill="var(--ink-soft)" transform={`translate(${to} ${startY}) rotate(${angle})`} />
+              </g>
+            );
+          })}
+        </svg>
+      )}
+      <span ref={lcdRef} style={hide}>
+        <InlineMath math={lcd} />
+      </span>
+      <span style={hide}>
+        <InlineMath math={tall ? "\\bigg(" : "("} />
+      </span>
+      {termPieces}
+      <span style={hide}>
+        <InlineMath math={tall ? "\\bigg)" : ")"} />
+      </span>
+    </span>
+  );
+}
+
+
 // A line that will be divided in place, drawn as a stack from the start:
 // "3x" is a stack of 3x over an invisible bar and denominator, the "=" is
 // a stack of "=" over nothing, and "3x/3" is the same stack with the bar
@@ -1077,7 +1317,18 @@ function strutFractions(tex: string): string {
 // Every bit of math on the page goes through here, so fractions are
 // always the same height (see strutFractions).
 function InlineMath({ math }: { math: string }) {
+  // Math with a number the student can click to switch its form (see
+  // numberForms.ts) carries \htmlData tags, which KaTeX only accepts when
+  // told to trust them - so that math is rendered here directly.
+  if (math.includes("\\htmlData")) return <TaggedMath math={strutFractions(math)} />;
   return <KatexInlineMath math={strutFractions(math)} />;
+}
+function TaggedMath({ math }: { math: string }) {
+  const html = useMemo(
+    () => katex.renderToString(math, { throwOnError: false, strict: false, trust: (context) => context.command === "\\htmlData" }),
+    [math]
+  );
+  return <span dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 // An expression whose like terms get shapes (combining like terms): each
@@ -1231,6 +1482,14 @@ function Cell({ math, color, align = "center" }: { math: string; color: string; 
         renderStackTop(math_.slice(STACKTOP_PREFIX.length), color)
       ) : isMarkedReciprocal ? (
         renderMarkedReciprocal(math_.slice(MARKEDRECIP_PREFIX.length), color)
+      ) : math_.startsWith(LCDWRAP_PREFIX) ? (
+        <LcdWrap payload={math_.slice(LCDWRAP_PREFIX.length)} color={color} />
+      ) : math_.startsWith(MARKEDCOEF_PREFIX) ? (
+        renderMarkedCoef(math_.slice(MARKEDCOEF_PREFIX.length))
+      ) : math_.startsWith(MARKEDDEN_PREFIX) ? (
+        renderMarkedDen(math_.slice(MARKEDDEN_PREFIX.length))
+      ) : math_.startsWith(MARKEDTIMES_PREFIX) ? (
+        renderMarkedTimes(math_.slice(MARKEDTIMES_PREFIX.length))
       ) : isMarkedParenFraction ? (
         renderMarkedParenFraction(math_.slice(MARKEDPARENFRACTION_PREFIX.length), color)
       ) : isMarkedParenMultReversed ? (
@@ -1276,7 +1535,13 @@ function MixedText({ content }: { content: string }) {
     <>
       {parts.map((part, i) =>
         part.startsWith("$") && part.endsWith("$") ? (
-          <InlineMath key={i} math={part.slice(1, -1)} />
+          // A fraction inside a sentence (a question, an answer choice, a
+          // message) is always drawn full size, with room between its
+          // numbers and a bar that's easy to see (.mixed-math in
+          // globals.css) - never the small, cramped in-line kind.
+          <span key={i} className="mixed-math">
+            <InlineMath math={part.slice(1, -1).replace(/\\[td]?frac(?![a-zA-Z])/g, "\\dfrac")} />
+          </span>
         ) : (
           <span key={i}>{renderTextWithEmbeddedNumbers(part)}</span>
         )
@@ -2805,7 +3070,7 @@ function AnchoredEquation({
   // bottom of the numbers beside it (centering them leaves the x a little
   // high in some browsers, since the fraction is tall).
   function fracCoefSlot(slotId: string): boolean {
-    return (slotVersions[slotId] ?? []).some((v) => v.cells.some((c) => /\\dfrac\{[^{}]*\}\{[^{}]*\}[a-zA-Z]/.test(c ?? "") && !/^[A-Z]+:/.test(c ?? "")));
+    return (slotVersions[slotId] ?? []).some((v) => v.cells.some((c) => /\\dfrac\{[^{}]*\}\{[^{}]*\}\}?[a-zA-Z]/.test(c ?? "") && !/^[A-Z]+:/.test(c ?? "")));
   }
 
   function SideBlock({
@@ -2990,6 +3255,39 @@ function AnchoredEquation({
                       </div>
                       <div style={{ position: "absolute", right: 0, top: 0, whiteSpace: "nowrap" }}>
                         <Cell math={tightSign(texSpacing(row.cells[c] ?? ""))} color={row.successCols?.includes(c) ? "var(--green)" : color} align="right" />
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              // The note under the first number after the "=" ("-0.5" under
+              // "5") can't reach back toward the "=" - the note under the
+              // other side ends right there. It ends where the number above
+              // ends when it fits under it with only its sign sticking out
+              // ("-12" under "27"); a wider note starts at the number's left
+              // edge instead (its sign just in front) and runs on to the
+              // right, where there's room. An invisible copy of the number
+              // above sets the width, so nothing is measured.
+              const underFirstRight = side === "right" && i === 0 && !alignColumns && !spans(row, c) && !isBlankCell(row.cells[c]);
+              const numberAbove = underFirstRight && aboveCell ? aboveCell.replace(/^MARKEDTERM:/, "") : undefined;
+              if (numberAbove && !/^[A-Z]+:/.test(numberAbove)) {
+                const noteCell = <Cell math={tightSign(texSpacing(row.cells[c] ?? ""))} color={row.successCols?.includes(c) ? "var(--green)" : color} align="right" />;
+                return (
+                  <div key={c} data-row-slot={dataSlot} data-col={c} style={{ gridRow: 1, gridColumn: i + 1, justifySelf: "start", width: 0, overflow: "visible", paddingTop: padTop || undefined, paddingBottom: padBottom || undefined, transform: liftOf(c) }}>
+                    <div style={{ position: "relative", width: "fit-content" }}>
+                      <div aria-hidden="true" style={{ height: 0, overflow: "hidden", visibility: "hidden", whiteSpace: "nowrap" }}>
+                        <Cell math={naturalSign(texSpacing(numberAbove))} color="var(--ink)" align="left" />
+                      </div>
+                      {/* (holds the line's height; takes no width) */}
+                      <div aria-hidden="true" style={{ width: 0, overflow: "hidden", visibility: "hidden", whiteSpace: "nowrap" }}>
+                        {noteCell}
+                      </div>
+                      {/* as wide as the number above plus room for a sign in
+                          front; the note sits at its right end when it fits
+                          (margin-left: auto), and starts at its left end -
+                          running past the right - when it doesn't */}
+                      <div style={{ position: "absolute", top: 0, left: "-0.8em", right: 0, display: "flex", whiteSpace: "nowrap" }}>
+                        <div style={{ marginLeft: "auto", flex: "none" }}>{noteCell}</div>
                       </div>
                     </div>
                   </div>
@@ -3228,6 +3526,98 @@ function AnchoredEquation({
   );
 }
 
+// The pop-up that lets the student choose how numbers that aren't whole
+// are written. It shows the number that was just found (or clicked) each
+// way it can be written; picking one rewrites the numbers that way - every
+// number in the work, the questions and the answer choices in a problem
+// worked with a calculator, and just the final answer in any other. Drawn over the top right
+// of the work, so it never moves the work itself.
+function NumberFormPopup({
+  title,
+  numberKey,
+  current,
+  onPick,
+  onClose,
+}: {
+  title: string;
+  numberKey: string;
+  current: NumberForm | null;
+  onPick: (form: NumberForm) => void;
+  onClose: () => void;
+}) {
+  const forms = formsOfNumber(numberKey);
+  if (forms.length < 2) return null;
+  return (
+    // (no height, and its share of the panel's spacing taken back, so the
+    // work underneath stays exactly where it is)
+    <div style={{ position: "relative", height: 0, marginBottom: -16, zIndex: 5 }}>
+      <div
+        role="dialog"
+        aria-label="How numbers are written"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: "absolute",
+          top: 0,
+          right: 0,
+          maxWidth: "100%",
+          background: "var(--card)",
+          border: "1px solid var(--line)",
+          borderTop: "3px solid var(--blue)",
+          borderRadius: 12,
+          boxShadow: "0 10px 30px rgba(28, 43, 69, 0.18)",
+          padding: "12px 14px 14px",
+          fontFamily: "var(--font-body)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, marginBottom: 10 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{title}</span>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            style={{ border: "none", background: "none", cursor: "pointer", fontSize: 18, lineHeight: 1, color: "var(--ink-soft)", padding: 2 }}
+          >
+            ×
+          </button>
+        </div>
+        <div role="radiogroup" aria-label="Number form" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {forms.map((f) => {
+            const active = current === f.form;
+            return (
+              <button
+                key={f.form}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => onPick(f.form)}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 6,
+                  minWidth: 96,
+                  border: `1.5px solid ${active ? "var(--blue)" : "var(--line)"}`,
+                  background: active ? "rgba(46, 111, 163, 0.1)" : "var(--paper)",
+                  borderRadius: 10,
+                  padding: "8px 12px",
+                  cursor: "pointer",
+                  color: "var(--ink)",
+                }}
+              >
+                <span className="mixed-math" style={{ fontSize: 18, minHeight: 44, display: "flex", alignItems: "center" }}>
+                  <InlineMath math={f.tex} />
+                </span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)" }}>{f.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function StepSolver({
   generate,
   skillName,
@@ -3244,7 +3634,32 @@ export default function StepSolver({
   // server than on the client, causing a hydration mismatch. useEffect
   // only ever runs in the browser, guaranteeing this happens client-side
   // only, after hydration is already settled.
-  const [instance, setInstance] = useState<SolverInstance | null>(null);
+  const [rawInstance, setRawInstance] = useState<SolverInstance | null>(null);
+  // How the student has chosen to see numbers that aren't whole (fractions,
+  // mixed numbers or decimals; null = as written) - for problems that allow
+  // it. The work, the questions and the answer choices all follow it.
+  const [numberForm, setNumberForm] = useState<NumberForm | null>(null);
+  // The pop-up offering that choice, for one number (its tag, "9-2"): shown
+  // when the student clicks a number, and by itself the first time an
+  // answer in the problem isn't a whole number.
+  const [formPopup, setFormPopup] = useState<string | null>(null);
+  const formPromptedRef = useRef(false);
+  // (a problem worked with a calculator: every number; any other problem:
+  // just its final answer)
+  const instance = useMemo(
+    () => (rawInstance ? applyNumberForms(rawInstance, numberForm, rawInstance.switchableNumbers ? "all" : "answers") : rawInstance),
+    [rawInstance, numberForm]
+  );
+  const setInstance = (next: SolverInstance) => {
+    setRawInstance(next);
+    setNumberForm(null);
+    setFormPopup(null);
+    formPromptedRef.current = false;
+  };
+  function handleNumberClick(e: MouseEvent<HTMLElement>) {
+    const key = ((e.target as HTMLElement).closest?.("[data-nf]") as HTMLElement | null)?.getAttribute("data-nf");
+    if (key) setFormPopup(key);
+  }
   const [stepIndex, setStepIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [revealed, setRevealed] = useState(false);
@@ -3339,6 +3754,12 @@ export default function StepSolver({
   }
 
   const visibleRows: (GridRow | PairedGridRow)[] = slotOrder.map((id) => slotContent[id]);
+  // Numbers the student can choose the form of: the last one on the card
+  // now (what the "change how it's written" button opens), and whether the
+  // problem will ever have one (so the button's room is kept from the start).
+  const switchTag = lastSwitchableTag(visibleRows);
+  const everSwitchable =
+    lastSwitchableTag([instance.initialRow, ...instance.steps.flatMap((st) => [...(st.rowUpdatesOnShow ?? []), ...st.rowUpdates].map((u) => u.row))]) !== null;
 
   // Proportions: the cross-multiply loops, once that step is answered.
   const crossLoopsIdx = instance.crossLoops ? instance.steps.findIndex((st) => st.stepId === instance.crossLoops!.afterStepId) : -1;
@@ -3390,6 +3811,11 @@ export default function StepSolver({
   for (const step of instance.steps) {
     const dv = step.distributeVisual;
     if (dv) arcReserveKeys.add(`${dv.targetSlotId ?? "__initial__"}|${dv.equation ?? ""}`);
+  }
+  // (...and a line the LCD is written around, for its arrows)
+  for (const [id, versions] of Object.entries(slotVersions)) {
+    // (only a side that's being distributed has arrows)
+    if (versions.some((r) => r.cells.some((c) => c.startsWith(LCDWRAP_PREFIX) && c.includes('"single":false')))) arcReserveKeys.add(`${id}|`);
   }
 
   let boldActiveSlotId: string | null = null;
@@ -3497,6 +3923,21 @@ export default function StepSolver({
     if (currentStep.choices[i].isCorrect) {
       setRevealed(true);
       setFurthestStepIndex((prev) => Math.max(prev, stepIndex));
+      // The first answer that isn't a whole number: offer the student the
+      // choice of how numbers like it are written.
+      // (an answer that is itself a number, like "9/2" or "x = 9/2" - not a
+      // sentence that mentions one, like "Dividing both sides by 3/4")
+      // (in a problem where only the final answer can be switched, that's
+      // the step that writes the answer line)
+      const answerText = currentStep.choices[i].text;
+      const writesAnswer = currentStep.rowUpdates.some((u) => (u.row as GridRow).highlight === "success");
+      if ((instance!.switchableNumbers || writesAnswer) && !formPromptedRef.current && /^\$[^$]+\$$/.test(answerText)) {
+        const key = firstSwitchableNumber(answerText);
+        if (key) {
+          formPromptedRef.current = true;
+          setFormPopup(key);
+        }
+      }
     }
   }
 
@@ -3505,6 +3946,7 @@ export default function StepSolver({
   // immediately in its answered state (correct choice highlighted)
   // rather than making the student re-click it.
   function goToStep(newIndex: number, alreadyAnswered: boolean) {
+    setFormPopup(null);
     setStepIndex(newIndex);
     if (alreadyAnswered) {
       setSelected(instance!.steps[newIndex].choices.findIndex((c) => c.isCorrect));
@@ -3602,6 +4044,7 @@ export default function StepSolver({
       {/* LEFT: math */}
       <div
         className="step-solver-panel-left"
+        onClick={handleNumberClick}
         style={{
           padding: "32px 28px",
           borderRight: "1px solid var(--line)",
@@ -3624,6 +4067,51 @@ export default function StepSolver({
         >
           {skillName}
         </div>
+        {/* The notice that a number's form can be chosen: a button, always
+            in the same spot under the skill's name. Its room is kept from the
+            first step in any problem that will have such a number, and it
+            shows as soon as one is on the card. */}
+        {everSwitchable && (
+          <div style={{ marginTop: -6, visibility: switchTag ? "visible" : "hidden" }} aria-hidden={!switchTag}>
+            <button
+              type="button"
+              tabIndex={switchTag ? 0 : -1}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (switchTag) setFormPopup(switchTag);
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                border: "1.5px solid var(--blue)",
+                background: "rgba(46, 111, 163, 0.08)",
+                color: "var(--blue)",
+                borderRadius: 999,
+                padding: "6px 14px",
+                fontSize: 13,
+                fontWeight: 700,
+                fontFamily: "var(--font-body)",
+                cursor: "pointer",
+              }}
+            >
+              <span aria-hidden="true">⇄</span>
+              {instance.switchableNumbers ? "Change how numbers are written: fraction, mixed number or decimal" : "Change how the answer is written: fraction, mixed number or decimal"}
+            </button>
+          </div>
+        )}
+        {formPopup && (
+          <NumberFormPopup
+            title={instance.switchableNumbers ? "How do you want numbers written?" : "How do you want the answer written?"}
+            numberKey={formPopup}
+            current={numberForm}
+            onPick={(form) => {
+              setNumberForm(form);
+              setFormPopup(null);
+            }}
+            onClose={() => setFormPopup(null)}
+          />
+        )}
         {instance.problemText && (
           <div style={{ fontSize: 18, fontWeight: 600, color: "var(--ink)", fontFamily: "var(--font-body)" }}>
             <MixedText content={instance.problemText} />

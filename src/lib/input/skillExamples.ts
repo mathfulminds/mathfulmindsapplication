@@ -34,6 +34,7 @@ import { generateSqInstance } from "@/lib/skills/quadraticsSquareRoots";
 import { generateFactorInstance } from "@/lib/skills/quadraticsFactoring";
 import { generateSlipInstance } from "@/lib/skills/quadraticsSlipSlide";
 import { generateExpressionInstance } from "@/lib/skills/combiningExpressions";
+import { generateClearFractionsInstance, generateMultiStepInequalityInstance } from "@/lib/skills/linearGeneral";
 import { generateOneStepRationalInstance } from "@/lib/skills/oneStepRational";
 import { generateEliminationInstance } from "@/lib/skills/systemsElimination";
 import { generateSubstitutionInstanceTwoTrack } from "@/lib/skills/systemsSubstitutionHorizontal";
@@ -68,6 +69,7 @@ export const SKILL_GROUPS: SkillExampleGroup[] = [
       { title: "Equations with Parentheses", skill: SKILLS.parenEq, generate: generateParenthesesEquationInstance },
       { title: "Distributing a Negative", skill: SKILLS.distNeg, generate: generateDistributeNegativeInstance },
       { title: "Fractional Coefficients", skill: SKILLS.fracEq, generate: generateFractionInstance },
+      { title: "Equations with Fractions", skill: SKILLS.clearFractions, generate: generateClearFractionsInstance },
       { title: "Non-Integer Solutions", skill: SKILLS.nonIntEq, generate: () => generateNonIntegerInstance("fraction") },
       { title: "Combining Like Terms", skill: SKILLS.combineLike, generate: generateCombiningLikeTermsInstance },
       { title: "Variables on Both Sides", skill: SKILLS.bothSides, generate: generateVariablesBothSidesInstance },
@@ -99,6 +101,7 @@ export const SKILL_GROUPS: SkillExampleGroup[] = [
       { title: "Two-Step Inequalities", skill: SKILLS.twoStepIneq, generate: generateTwoStepInequalityInstance },
       { title: "Inequalities with Parentheses", skill: SKILLS.parenIneq, generate: generateParenthesesInequalityInstance },
       { title: "Variables on Both Sides", skill: SKILLS.bothSidesIneq, generate: generateBothSidesInequalityInstance },
+      { title: "Multi-Step Inequalities", skill: SKILLS.multiIneq, generate: generateMultiStepInequalityInstance },
       { title: "Fractional Coefficients", skill: SKILLS.fracIneq, generate: generateFractionalCoefficientsInequalityInstance },
       {
         title: "Non-Integer Inequalities",

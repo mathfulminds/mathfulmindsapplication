@@ -21,6 +21,11 @@ export default function NavBar() {
   // collapse behind a menu button instead.
   const [menuOpen, setMenuOpen] = useState(false)
 
+  // The waitlist landing page (also served at "/") has no top bar at all:
+  // its own logo sits above the headline, and the sign-up form is the one
+  // thing to do there.
+  if (pathname === '/' || pathname === '/waitlist') return null
+
   return (
     <header
       className="site-header"

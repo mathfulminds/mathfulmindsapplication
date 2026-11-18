@@ -77,6 +77,7 @@ export const SKILLS = {
   twoStepEq: { id: "twoStepEq", name: "Two-step equations", href: "/solve/two-step-equations" },
   twoStepIneq: { id: "twoStepIneq", name: "Two-step inequalities", href: "/solve/two-step-inequalities" },
   fracEq: { id: "fracEq", name: "Fractional coefficients", href: "/solve/fractional-coefficients" },
+  clearFractions: { id: "clearFractions", name: "Equations with fractions", href: "/solve/clearing-fractions" },
   fracIneq: { id: "fracIneq", name: "Fractional coefficients (inequalities)", href: "/solve/fractional-coefficients-inequalities" },
   nonIntEq: { id: "nonIntEq", name: "Fraction / decimal solutions", href: "/solve/non-integer-solutions" },
   nonIntIneq: { id: "nonIntIneq", name: "Fraction / decimal solutions (inequalities)", href: "/solve/non-integer-inequalities" },
@@ -89,6 +90,7 @@ export const SKILLS = {
   exprCombine: { id: "exprCombine", name: "Combining like terms (expressions)", href: "/solve/combining-like-terms-expressions" },
   roots: { id: "roots", name: "Square & cube roots", href: "/solve/square-and-cube-roots" },
   literal: { id: "literal", name: "Literal equations", href: "/solve/literal-equations" },
+  multiIneq: { id: "multiIneq", name: "Multi-step inequalities", href: "/solve/multi-step-inequalities" },
   compoundIneq: { id: "compoundIneq", name: "Compound inequalities", href: "/solve/compound-inequalities" },
   bothSidesIneq: { id: "bothSidesIneq", name: "Inequalities with variables on both sides", href: "/solve/variables-both-sides-inequalities" },
   decPct: { id: "decPct", name: "Decimal & percent equations", href: "/solve/decimal-percent-equations" },
@@ -112,6 +114,16 @@ export const SKILLS = {
   elimination: { id: "elimination", name: "Systems of equations: elimination", href: "/solve/systems-elimination" },
   substitution: { id: "substitution", name: "Systems of equations: substitution", href: "/solve/systems-substitution" },
 } satisfies Record<string, SkillInfo>;
+
+// The two ways to work a problem with fractions in it (the labels on the
+// "Solve by" buttons). Without a calculator, the denominators are cleared
+// with the LCD first (or, when the only fraction is the number in front of
+// the variable, both sides are multiplied by its reciprocal); with one, the
+// fractions stay and the student divides.
+export const FRACTION_METHODS = [
+  { id: "fractions-lcd", method: "lcd", label: "No Calculator" },
+  { id: "fractions-calculator", method: "calculator", label: "Calculator" },
+] as const;
 
 const SAFETY_MESSAGE =
   "This problem fits one of the skills, but a few of its steps wouldn't come out right with these exact numbers yet (this usually happens with special values like 1 or -1), so I'd rather not show them. Try a similar problem with different numbers.";
@@ -174,16 +186,18 @@ const INTEGER_ANSWER_ONLY =
 
 // The narrow skills first; anything they can't take (another arrangement
 // of parentheses or like terms, a fraction answer, a variable that cancels)
-// goes to the general planner, which works through any linear equation in
-// the same layout. Its own limits keep the original message.
+// goes to the general planner, which works through any linear equation or
+// inequality in the same layout. Its own limits keep the original message.
 function routeSingleOrPlan(eq: ParsedEquation): Built {
   try {
     return routeSingle(eq);
   } catch (e) {
-    if (!(e instanceof NotSupported) || eq.relation !== "=" || eq.variables.length !== 1) throw e;
-    const plan = planLinearEquation(eq.left, eq.right, eq.variables[0]);
+    if (!(e instanceof NotSupported) || eq.variables.length !== 1) throw e;
+    const rel = eq.relation === "=" ? null : SYMBOL[eq.relation];
+    const plan = planLinearEquation(eq.left, eq.right, eq.variables[0], rel);
     if (!plan) throw e;
-    return { skill: plan.hasParens ? SKILLS.multiWithParen : SKILLS.multiNoParen, instance: plan.instance };
+    const skill = plan.clearedFractions ? SKILLS.clearFractions : plan.inequality ? SKILLS.multiIneq : plan.hasParens ? SKILLS.multiWithParen : SKILLS.multiNoParen;
+    return { skill, instance: plan.instance };
   }
 }
 
@@ -255,7 +269,16 @@ function rationalOneStep(
   };
 }
 
+// A mixed number anywhere in the problem ("2 1/2x + 3 = 8"): the narrow
+// skills would redraw it as a fraction or a decimal, so these go straight
+// to the general planner, which rewrites it as an improper fraction first.
+const hasMixed = (terms: SurfaceTerm[]): boolean =>
+  terms.some((t) => (isConst(t) ? t.style === "mixed" : isVar(t) ? t.coefStyle === "mixed" : t.mStyle === "mixed" || hasMixed(t.inner)));
+const MIXED_NOT_YET =
+  "Mixed numbers are supported in equations and inequalities made of whole numbers and fractions, like 2 1/2x + 3 = 8 (without parentheses or decimals). Try rewriting the problem in that form.";
+
 function routeSingle(eq: ParsedEquation): Built {
+  if (hasMixed([...eq.left, ...eq.right])) fail(MIXED_NOT_YET);
   checkNoZeroTerms(eq);
   const v = eq.variables[0];
   const isIneq = eq.relation !== "=";
@@ -327,6 +350,11 @@ function routeSingle(eq: ParsedEquation): Built {
           ? { skill: SKILLS.oneStepIneq, instance: buildOneStepIneq({ ...inst, boundary: val(solution), origSymbol: symbol! }, v) }
           : { skill: SKILLS.oneStepEq, instance: buildOneStepEq({ ...inst, solution: val(solution) }, v) };
       }
+      // A whole number times x equal to a fraction ("3x = 1/2"): dividing a
+      // fraction by 3 in place would stack a fraction on a fraction, so it
+      // goes with the other fraction problems (clear the denominator, or
+      // keep it and use a calculator).
+      if (isInt(a) && term.coefStyle === "int" && (C[0] as ConstTerm).style === "fraction") fail(NOT_YET_GENERAL);
       if (!isIneq) return rationalOneStep(eq, "mul", a, c, solution, true, orientation, v);
       fail(
         isInt(solution)
@@ -396,6 +424,16 @@ function routeSingle(eq: ParsedEquation): Built {
       // A fraction/decimal answer, or fraction/decimal constants.
       if (eq.usesDecimal && (!decimalOK(b) || !decimalOK(c))) fail("Mixing decimals with fractions isn't supported yet.");
       const mode = eq.usesDecimal ? ("decimal" as const) : ("fraction" as const);
+      // A whole number in front of the variable is undone by dividing by it
+      // ("3x = -5" -> divide both sides by 3 -> x = -5/3), never by
+      // multiplying by 1/3 - so these go through the general planner. With
+      // fractions among the other numbers, that's the fractions skill (clear
+      // the denominators, or keep them and use a calculator).
+      if (mode === "fraction") {
+        const plan = planLinearEquation(eq.left, eq.right, v, symbol);
+        // (numbers the planner can't lay out cleanly keep the older steps)
+        if (plan && blockingIssues(validateInstance(plan.instance, [v])).length === 0) return { skill: plan.clearedFractions ? SKILLS.clearFractions : isIneq ? SKILLS.nonIntIneq : SKILLS.nonIntEq, instance: plan.instance };
+      }
       const inst = { mode, a: val(a), b, variableFirst, orientation, rhs: c };
       return isIneq
         ? { skill: SKILLS.nonIntIneq, instance: buildNonIntIneq({ ...inst, boundary: solution, origSymbol: symbol! }, v) }
@@ -1004,6 +1042,25 @@ export function routeInput(raw: string): RouteResult {
         ? { skill: SKILLS.proportion, instance: buildProportionInstance(eq.proportion, eq.variables[0]) }
         : routeSingleOrPlan(eq);
       options = [{ id: built.skill.id, label: built.skill.name, ...built }];
+      // A problem with fractions in it can be worked two ways: without a
+      // calculator (clearing the denominators first) or with one (keeping
+      // the fractions). The student picks above the problem.
+      // The same choice goes with the skills that multiply by a reciprocal
+      // (a fraction in front of the variable, like 3/4x + 2 = 8): that's the
+      // way to do it without a calculator; with one, the student divides.
+      const terms = [...eq.left, ...eq.right];
+      const hasDecimal = terms.some((t) => (isConst(t) ? t.style === "decimal" : isVar(t) ? t.coefStyle === "decimal" : t.mStyle === "decimal"));
+      const fractionSkill =
+        built.skill === SKILLS.clearFractions ||
+        built.skill === SKILLS.fracEq ||
+        built.skill === SKILLS.fracIneq ||
+        (built.skill === SKILLS.oneStepRational && eq.usesFraction && !hasDecimal);
+      if (fractionSkill && !eq.percent && !eq.proportion) {
+        const rel = eq.relation === "=" ? null : SYMBOL[eq.relation];
+        const calc = planLinearEquation(eq.left, eq.right, eq.variables[0], rel, "calculator");
+        options = [{ id: FRACTION_METHODS[0].id, label: FRACTION_METHODS[0].label, ...built }];
+        if (calc) options.push({ id: FRACTION_METHODS[1].id, label: FRACTION_METHODS[1].label, skill: built.skill, instance: calc.instance });
+      }
       variables = eq.variables;
     }
 
