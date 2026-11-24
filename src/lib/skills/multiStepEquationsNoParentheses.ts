@@ -579,7 +579,8 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
         { slotId: currentSlotForCancelVar, row: { cells: currentLineMarkedForVar } },
         { slotId: "cancel_var_annotation", row: { cells: cancelRow1Marked } },
       ],
-      prompt: `What is ${plainAbsTerm(opAbs, x)} ${opSym} ${plainAbsTerm(opAbs, x)}?`,
+      // (undoing a negative term: "-6x + 6x", not "6x + 6x")
+      prompt: `What is ${aRight < 0 ? "-" : ""}${plainAbsTerm(opAbs, x)} ${opSym} ${plainAbsTerm(opAbs, x)}?`,
       choices: shuffle([
         { text: "0", isCorrect: true, misconceptionTag: null },
         { text: cancel1Distractors[0].text, isCorrect: false, misconceptionTag: cancel1Distractors[0].tag },
@@ -694,7 +695,8 @@ export function buildSolverInstance(eq: EquationInstance, variableSymbol: string
           { slotId: "after_var_elim", row: { cells: afterVarElimMarked } },
           { slotId: "cancel_const_annotation", row: { cells: cancelRow2Marked } },
         ],
-        prompt: `What is ${op2Abs} ${op2Sym} ${op2Abs}?`,
+        // (undoing a negative number: "-7 + 7", not "7 + 7")
+        prompt: `What is ${op2Sym === "+" ? "-" : ""}${op2Abs} ${op2Sym} ${op2Abs}?`,
         choices: shuffle([
           { text: "0", isCorrect: true, misconceptionTag: null },
           { text: cancel2Distractors[0].text, isCorrect: false, misconceptionTag: cancel2Distractors[0].tag },
