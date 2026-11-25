@@ -124,14 +124,16 @@ export function buildAustralianInstance(
   // the bar, the number under it, the "= 0" - not written yet. It is drawn
   // as the finished line with those parts unseen, so the numbers are already
   // where they will stay.
-  const INK = "#1c2b45";
   const unseen = (t: string) => `\\textcolor{transparent}{${t}}`;
-  const blankFactor = (v: number) => `\\textcolor{${INK}}{(}${ax}\\textcolor{${INK}}{{} ${signed(v)})}`;
+  // (a fraction with no bar drawn - \genfrac with a 0pt bar - whose missing
+  // parts are \phantom: nothing here depends on colors inside colors, which
+  // Safari doesn't draw the way other browsers do)
+  const blankFactor = (v: number) => `(\\phantom{${ax}}{} ${signed(v)})`;
+  const blanksMath = `\\genfrac{}{}{0pt}{0}{${blankFactor(p)}${blankFactor(q)}}{\\phantom{${a}}}`;
   const blanksRow: GridRow = (() => {
-    const row = fracLine(unseen(`\\dfrac{${blankFactor(p)}${blankFactor(q)}}{${a}}`));
-    const at = row.cells.indexOf(unseen(`\\dfrac{${blankFactor(p)}${blankFactor(q)}}{${a}}`));
+    const row = fracLine(blanksMath);
     // (the "=" and the 0 on this line wait too)
-    return { ...row, cells: row.cells.map((cell, i) => (i === at || cell === BLANK ? cell : unseen(cell))) };
+    return { ...row, cells: row.cells.map((cell) => (cell === blanksMath || cell === BLANK ? cell : unseen(cell))) };
   })();
   const seen = new Set<string>();
   const signChoices: Choice[] = [];
