@@ -10,7 +10,7 @@ const METHODS: { method: LeadingMethod; label: string }[] = [
   { method: "australian", label: "Australian method" },
 ];
 
-export default function QuadraticsSlipSlidePage() {
+export default function QuadraticsPage() {
   const [method, setMethod] = useState<LeadingMethod>("slip");
   // The problem on the card. Switching methods keeps it (the same problem
   // is worked the other way); "Try a new problem" replaces it.
