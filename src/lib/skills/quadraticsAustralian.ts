@@ -115,6 +115,24 @@ export function buildAustralianInstance(
         : `${small} + ${big} = ${small + big}, so with the same sign on both they can add to ${b}. Next, their signs.`,
     sideList: { ...list, marked: chosen },
   });
+  const ax = `${a}${x}`;
+  // (ax + p); with `hl`, its two numbers are called out in bold blue
+  const factor = (v: number, hl = false) => (hl ? `(${hlNum(a)}${x} ${v < 0 ? "-" : "+"} ${hlNum(Math.abs(v))})` : `(${ax} ${signed(v)})`);
+  const setup = (hl1 = false, hl2 = false) => `\\dfrac{${factor(p, hl1)}${factor(q, hl2)}}{${a}}`;
+  // The setup line as it first appears, once the two numbers and their signs
+  // are known: "(   + 2)(   + 9)" with the rest - the ax in each parenthesis,
+  // the bar, the number under it, the "= 0" - not written yet. It is drawn
+  // as the finished line with those parts unseen, so the numbers are already
+  // where they will stay.
+  const INK = "#1c2b45";
+  const unseen = (t: string) => `\\textcolor{transparent}{${t}}`;
+  const blankFactor = (v: number) => `\\textcolor{${INK}}{(}${ax}\\textcolor{${INK}}{{} ${signed(v)})}`;
+  const blanksRow: GridRow = (() => {
+    const row = fracLine(unseen(`\\dfrac{${blankFactor(p)}${blankFactor(q)}}{${a}}`));
+    const at = row.cells.indexOf(unseen(`\\dfrac{${blankFactor(p)}${blankFactor(q)}}{${a}}`));
+    // (the "=" and the 0 on this line wait too)
+    return { ...row, cells: row.cells.map((cell, i) => (i === at || cell === BLANK ? cell : unseen(cell))) };
+  })();
   const seen = new Set<string>();
   const signChoices: Choice[] = [];
   for (const [u, v] of [[p, q], [-p, -q], [Math.abs(p), Math.abs(q)], [-Math.abs(p), -Math.abs(q)], [Math.abs(p), -Math.abs(q)], [-Math.abs(p), Math.abs(q)]] as [number, number][]) {
@@ -125,7 +143,7 @@ export function buildAustralianInstance(
   }
   steps.push({
     stepId: "factor_signs",
-    rowUpdates: [],
+    rowUpdates: [{ slotId: "aus_setup", row: blanksRow }],
     prompt: `The two numbers have to multiply to ${ac} and add to ${b}. Which signs make that work?`,
     choices: shuffle(signChoices.slice(0, 4)),
     explanationOnCorrect: `${$(`${paren(p)} \\cdot ${paren(q)} = ${ac}`)} and ${$(`${paren(p)} + ${paren(q)} = ${b}`)}.`,
@@ -133,10 +151,6 @@ export function buildAustralianInstance(
   });
 
   // ---------- 3. the setup ----------
-  const ax = `${a}${x}`;
-  // (ax + p); with `hl`, its two numbers are called out in bold blue
-  const factor = (v: number, hl = false) => (hl ? `(${hlNum(a)}${x} ${v < 0 ? "-" : "+"} ${hlNum(Math.abs(v))})` : `(${ax} ${signed(v)})`);
-  const setup = (hl1 = false, hl2 = false) => `\\dfrac{${factor(p, hl1)}${factor(q, hl2)}}{${a}}`;
   steps.push({
     stepId: "aus_setup",
     rowUpdates: [{ slotId: "aus_setup", row: fracLine(setup()) }],

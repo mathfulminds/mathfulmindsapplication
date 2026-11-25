@@ -4391,7 +4391,7 @@ export default function StepSolver({
                   width: `${(100 * (stepIndex + (revealed ? 1 : 0.15))) / instance!.steps.length}%`,
                   height: "100%",
                   borderRadius: 999,
-                  background: "var(--blue)",
+                  background: "var(--green)",
                   transition: "width 0.3s ease",
                 }}
               />
@@ -4469,9 +4469,9 @@ export default function StepSolver({
                   onClick={() => setConfirmRestart(true)}
                   style={{
                     alignSelf: "flex-start",
-                    background: "var(--paper)",
-                    color: "var(--ink)",
-                    border: "1.5px solid var(--line)",
+                    background: "var(--coral)",
+                    color: "#fff",
+                    border: "1.5px solid var(--coral)",
                     borderRadius: 999,
                     padding: "9px 20px",
                     fontSize: 14,
@@ -4488,7 +4488,7 @@ export default function StepSolver({
                   onClick={handleNext}
                   style={{
                     alignSelf: "flex-start",
-                    background: "var(--blue)",
+                    background: "var(--green)",
                     color: "#fff",
                     border: "none",
                     borderRadius: 999,
