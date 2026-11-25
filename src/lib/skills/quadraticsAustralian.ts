@@ -237,8 +237,8 @@ export function buildAustralianInstance(
     stepId: "aus_divide_a",
     rowUpdatesOnShow: [{ slotId: topSlot, row: fracLine(topMath) }],
     rowUpdates: [
-      // (crossed out, the two numbers go back to ink - still bold - so the red X shows up on them)
-      { slotId: topSlot, row: fracLine(`${CROSSFRAC}${topMath.split(redNum(a)).join(`\\mathbf{${a}}`)}`) },
+      // (crossed out, the two numbers stay bold red)
+      { slotId: topSlot, row: fracLine(`${CROSSFRAC}${topMath}`) },
       { slotId: "aus_done", row: line(inner) },
     ],
     prompt: `What is ${$(`${redNum(a)} \\div ${redNum(a)}`)}?`,
