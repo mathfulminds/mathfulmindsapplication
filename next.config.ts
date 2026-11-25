@@ -11,9 +11,6 @@ const nextConfig: NextConfig = {
         destination: "https://mathfulminds.com/:path*",
         permanent: true,
       },
-      // The ax² + bx + c factoring page moved to a shorter address (it now
-      // offers two methods, not just slip and slide). The old one still works.
-      { source: "/solve/quadratics-slip-and-slide", destination: "/solve/quadratics", permanent: true },
     ];
   },
 };
