@@ -140,6 +140,10 @@ export interface SideList {
   title: string; // plain text, e.g. "Factor pairs of 12"
   items: string[]; // KaTeX, e.g. "1 \\cdot 12"
   marked?: number; // index of the item shown boxed in the answer color
+  // Optional: one line of math written above the list ("6 \\cdot 3 = 18").
+  // A step can show it on its own (no items yet); the room for the whole
+  // list is held from the first step either way.
+  note?: string;
 }
 
 export interface DistributeVisual {

@@ -73,7 +73,7 @@ const groups: SkillGroup[] = [
     skills: [
       { title: 'Quadratics by Square Roots', description: 'Solve (x \u2212 3)\u00b2 = 16 by taking the square root of both sides.', href: '/solve/quadratics-square-roots' },
       { title: 'Quadratics by Factoring', description: 'Factor x\u00b2 + 4x \u2212 12 = 0 with the factor pairs of 12, then solve both factors.', href: '/solve/quadratics-factoring' },
-      { title: 'Quadratics by Factoring (ax\u00b2 + bx + c)', description: 'Slip and slide: factor 2x\u00b2 + 7x + 3 = 0, then solve both factors.', href: '/solve/quadratics-slip-and-slide' },
+      { title: 'Quadratics by Factoring (ax\u00b2 + bx + c)', description: 'Factor 2x\u00b2 + 7x + 3 = 0 by slip and slide or the Australian method, then solve both factors.', href: '/solve/quadratics-slip-and-slide' },
     ],
   },
 ]

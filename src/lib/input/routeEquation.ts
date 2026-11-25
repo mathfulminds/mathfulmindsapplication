@@ -87,6 +87,7 @@ export const SKILLS = {
   quadSqrt: { id: "quadSqrt", name: "Quadratics by square roots", href: "/solve/quadratics-square-roots" },
   quadFactor: { id: "quadFactor", name: "Quadratics by factoring", href: "/solve/quadratics-factoring" },
   quadSlip: { id: "quadSlip", name: "Quadratics by factoring (ax² + bx + c)", href: "/solve/quadratics-slip-and-slide" },
+  quadAus: { id: "quadAus", name: "Quadratics by factoring: Australian method", href: "/solve/quadratics-slip-and-slide" },
   exprCombine: { id: "exprCombine", name: "Combining like terms (expressions)", href: "/solve/combining-like-terms-expressions" },
   roots: { id: "roots", name: "Square & cube roots", href: "/solve/square-and-cube-roots" },
   literal: { id: "literal", name: "Literal equations", href: "/solve/literal-equations" },
@@ -960,8 +961,16 @@ export function routeInput(raw: string): RouteResult {
       const q = eqs[0].quad;
       const err = quadProblemError(q);
       if (err) fail(err);
-      const sk = quadSkill(q) === "factor" ? SKILLS.quadFactor : SKILLS.quadSlip;
-      options = [{ id: sk.id, label: sk.name, skill: sk, instance: buildQuadraticInstance(q, eqs[0].variables[0]) }];
+      if (quadSkill(q) === "factor") {
+        const sk = SKILLS.quadFactor;
+        options = [{ id: sk.id, label: sk.name, skill: sk, instance: buildQuadraticInstance(q, eqs[0].variables[0]) }];
+      } else {
+        // a number in front of x²: two ways to factor it, the student's choice
+        options = [
+          { id: SKILLS.quadSlip.id, label: "Slip and slide", skill: SKILLS.quadSlip, instance: buildQuadraticInstance(q, eqs[0].variables[0], "slip") },
+          { id: SKILLS.quadAus.id, label: "Australian method", skill: SKILLS.quadAus, instance: buildQuadraticInstance(q, eqs[0].variables[0], "australian") },
+        ];
+      }
       variables = eqs[0].variables;
     } else if (eqs.length === 1 && eqs[0].sqRoot) {
       const sq = eqs[0].sqRoot;

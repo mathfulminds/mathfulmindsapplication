@@ -17,6 +17,10 @@ import type { ComparisonSymbol } from "./inequalityCore";
 import { REL, JOIN, buildTwoPart, withCorrect, dedup, divideChoices, coefficientOneStep } from "./compoundInequalities";
 import { buildFactorInstance, factorNumbers, generateFactorProblem, zeroLeftText, zeroLeftLine } from "./quadraticsFactoring";
 import { buildSlipInstance, slipNumbers, generateSlipProblem } from "./quadraticsSlipSlide";
+import { buildAustralianInstance } from "./quadraticsAustralian";
+
+// The two ways to factor ax² + bx + c when a isn't 1.
+export type LeadingMethod = "slip" | "australian";
 
 export interface QuadTerm {
   coef: number;
@@ -128,7 +132,8 @@ export function quadSkill(q: QuadInput): "factor" | "slip" {
   return a / g === 1 ? "factor" : "slip";
 }
 
-export function buildQuadraticInstance(q: QuadInput, x: string = "x"): SolverInstance {
+export function buildQuadraticInstance(q: QuadInput, x: string = "x", method: LeadingMethod = "slip"): SolverInstance {
+  const buildLeading = method === "australian" ? buildAustralianInstance : buildSlipInstance;
   const err = quadProblemError(q);
   if (err) throw new Error(err);
   const { a, b, c, flip, moved } = standardForm(q);
@@ -387,8 +392,8 @@ export function buildQuadraticInstance(q: QuadInput, x: string = "x"): SolverIns
     trinomialAt = { slotId: "setup_inner", row: workLine(inner) };
   }
 
-  if (!moved && g === 1 && !zl) return ia === 1 ? buildFactorInstance({ b: ib, c: ic }, x) : buildSlipInstance({ a: ia, b: ib, c: ic }, x);
-  return ia === 1 ? buildFactorInstance({ b: ib, c: ic }, x, prelude()) : buildSlipInstance({ a: ia, b: ib, c: ic }, x, prelude());
+  if (!moved && g === 1 && !zl) return ia === 1 ? buildFactorInstance({ b: ib, c: ic }, x) : buildLeading({ a: ia, b: ib, c: ic }, x);
+  return ia === 1 ? buildFactorInstance({ b: ib, c: ic }, x, prelude()) : buildLeading({ a: ia, b: ib, c: ic }, x, prelude());
 }
 
 // ---------- practice problems ----------
@@ -424,4 +429,14 @@ export function generateFactorPractice(): SolverInstance {
 export function generateSlipPractice(): SolverInstance {
   const p = generateSlipProblem();
   return buildQuadraticInstance(practice(p.a, p.b, p.c));
+}
+// A practice problem with a number in front of x², on its own - so the
+// practice page can work the same problem by either method.
+export function generateLeadingProblem(): QuadInput {
+  const p = generateSlipProblem();
+  return practice(p.a, p.b, p.c);
+}
+// (the same problems, worked with the Australian method)
+export function generateAustralianPractice(): SolverInstance {
+  return buildQuadraticInstance(generateLeadingProblem(), "x", "australian");
 }

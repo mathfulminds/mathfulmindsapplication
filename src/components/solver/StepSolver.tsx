@@ -433,16 +433,26 @@ function RaysNumberLineGraph({
 // The list shown beside the work (factor pairs of c), one item per line,
 // with the chosen one boxed in the answer color. Always laid out (just
 // invisible until it's shown), so nothing moves when it appears.
-function SideListPanel({ list, shown }: { list: SideList; shown: boolean }) {
+// `full` is the fullest version the list will reach: its note, title and
+// every item hold their room from the start, and only what `list` has so far
+// is drawn - so the list grows in place and never moves the work.
+function SideListPanel({ list, full, shown }: { list: SideList; full: SideList; shown: boolean }) {
+  const hide = (visible: boolean) => (visible ? undefined : ("hidden" as const));
   return (
     <div aria-hidden={!shown} style={{ visibility: shown ? "visible" : "hidden", flex: "none", paddingTop: 14, fontSize: 20, color: "var(--ink)" }}>
-      <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.3, color: "var(--ink-soft)", marginBottom: 6, whiteSpace: "nowrap" }}>{list.title}</div>
-      {list.items.map((it, i) => {
+      {full.note !== undefined && (
+        <div style={{ whiteSpace: "nowrap", padding: "1px 8px", lineHeight: 1.7, marginBottom: 10, visibility: hide(list.note !== undefined) }}>
+          <InlineMath math={list.note ?? full.note} />
+        </div>
+      )}
+      <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.3, color: "var(--ink-soft)", marginBottom: 6, whiteSpace: "nowrap", visibility: hide(list.items.length > 0) }}>{full.title}</div>
+      {full.items.map((it, i) => {
         const marked = list.marked === i;
         return (
           <div
             key={i}
             style={{
+              visibility: hide(i < list.items.length),
               whiteSpace: "nowrap",
               padding: "1px 8px",
               margin: "2px 0",
@@ -1015,13 +1025,15 @@ function renderMarkedCoef(content: string): ReactNode {
 // and nothing moves when the X appears.
 //   "outside": the number written beside a fraction - the 3 in "(3) x/3"
 //   "bottom":  the number under the fraction's bar - the 3 in "x/3"
-type CrossTarget = "outside" | "bottom";
+//   "topBold": the bold number on top of the fraction - the 6 in "6(3x + 1)(2x + 3) / 6"
+type CrossTarget = "outside" | "bottom" | "topBold";
 function crossTargets(root: HTMLElement, which: CrossTarget): HTMLElement[] {
   const digits = Array.from(root.querySelectorAll<HTMLElement>(".katex-html .mord")).filter((el) => el.childElementCount === 0 && /^\d+$/.test(el.textContent ?? ""));
   const inFraction = (el: HTMLElement) => !!el.closest(".mfrac");
   if (which === "outside") return digits.filter((el) => !inFraction(el));
   const inside = digits.filter(inFraction);
   const lowest = Math.max(...inside.map((el) => el.getBoundingClientRect().top));
+  if (which === "topBold") return inside.filter((el) => el.getBoundingClientRect().top <= lowest - 2 && el.classList.contains("mathbf"));
   return inside.filter((el) => el.getBoundingClientRect().top > lowest - 2);
 }
 // the vertical middle of the digits themselves in a run of text
@@ -1090,6 +1102,11 @@ function renderMarkedDen(content: string): ReactNode {
   const [sign = "", top = "", den = ""] = content.split(COEF_VAR_SEPARATOR);
   return <CrossedMath math={`${sign}\\dfrac{${top}}{${den}}`} cross={["bottom"]} />;
 }
+
+// A fraction with the bold number on top and the number under the bar both
+// crossed out: "6(3x + 1)(2x + 3) / 6" (the two 6s divide to 1).
+// Format: "CROSSFRAC:" + the math.
+const CROSSFRAC_PREFIX = "CROSSFRAC:";
 
 // "x/3" multiplied by 3, written "(3) x/3" (or "x/3 (3)" on the right side
 // of the "="), with both 3s crossed out.
@@ -1488,6 +1505,8 @@ function Cell({ math, color, align = "center" }: { math: string; color: string; 
         renderMarkedCoef(math_.slice(MARKEDCOEF_PREFIX.length))
       ) : math_.startsWith(MARKEDDEN_PREFIX) ? (
         renderMarkedDen(math_.slice(MARKEDDEN_PREFIX.length))
+      ) : math_.startsWith(CROSSFRAC_PREFIX) ? (
+        <CrossedMath math={math_.slice(CROSSFRAC_PREFIX.length)} cross={["topBold", "bottom"]} />
       ) : math_.startsWith(MARKEDTIMES_PREFIX) ? (
         renderMarkedTimes(math_.slice(MARKEDTIMES_PREFIX.length))
       ) : isMarkedParenFraction ? (
@@ -3663,6 +3682,8 @@ export default function StepSolver({
   const [stepIndex, setStepIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [revealed, setRevealed] = useState(false);
+  // (the "Are you sure?" pop-up before Start over)
+  const [confirmRestart, setConfirmRestart] = useState(false);
   // Tracks the furthest step actually answered, separately from stepIndex
   // (which step is currently being VIEWED). This is what lets "Next"
   // after going "Previous" just resume showing already-answered steps
@@ -3773,6 +3794,13 @@ export default function StepSolver({
   // A list beside the work (factor pairs): the newest one whose step has
   // been answered. Its room is held from the first step.
   const sideListAll = instance.steps.find((st) => st.sideList)?.sideList;
+  // (the fullest version: the most items, and the note if any step has one)
+  const sideLists = instance.steps.flatMap((st) => (st.sideList ? [st.sideList] : []));
+  const sideListFull: SideList | undefined = sideListAll && {
+    ...sideLists.reduce((best, l) => (l.items.length > best.items.length ? l : best), sideListAll),
+    note: sideLists.find((l) => l.note !== undefined)?.note,
+    marked: undefined,
+  };
   let sideListShown: SideList | undefined;
   instance.steps.forEach((st, i) => {
     if (st.sideList && (stepIndex > i || (stepIndex === i && revealed))) sideListShown = st.sideList;
@@ -3970,6 +3998,19 @@ export default function StepSolver({
     goToStep(nextIndex, nextIndex <= furthestStepIndex);
   }
 
+  // Start over: the same problem again from its first question, with
+  // nothing answered. Asked for first, since the work so far is wiped.
+  function handleStartOver() {
+    setConfirmRestart(false);
+    setFormPopup(null);
+    setStepIndex(0);
+    setSelected(null);
+    setRevealed(false);
+    setFurthestStepIndex(0);
+    celebratedRef.current = false;
+    setCelebration(null);
+  }
+
   function handleNewProblem() {
     setInstance(signChoices(generate()));
     setStepIndex(0);
@@ -3999,6 +4040,41 @@ export default function StepSolver({
         }
       `}</style>
       {celebration !== null && <Celebration celebrationKey={celebration} onDone={() => setCelebration(null)} />}
+      {confirmRestart && (
+        // (a fixed overlay: it sits over the page and moves nothing under it)
+        <div
+          onClick={() => setConfirmRestart(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(20, 24, 40, 0.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="start-over-title"
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: "var(--card)", border: "1px solid var(--line)", borderTop: "3px solid var(--coral)", borderRadius: 14, padding: "22px 24px", maxWidth: 380, width: "100%" }}
+          >
+            <div id="start-over-title" style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--ink)", marginBottom: 6 }}>
+              Are you sure?
+            </div>
+            <div style={{ fontSize: 15, color: "var(--ink-soft)", lineHeight: 1.5, marginBottom: 18 }}>Your progress will be lost.</div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button
+                autoFocus
+                onClick={() => setConfirmRestart(false)}
+                style={{ background: "var(--paper)", color: "var(--ink)", border: "1.5px solid var(--line)", borderRadius: 999, padding: "9px 20px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
+              >
+                Keep going
+              </button>
+              <button
+                onClick={handleStartOver}
+                style={{ background: "var(--coral)", color: "#fff", border: "none", borderRadius: 999, padding: "9px 20px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
+              >
+                Start over
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Below a certain width, the side-by-side math/MCQ layout leaves
           too little room for the math panel - a 4-column inequality row
           (constant, symbol, two expression terms) commonly needs ~190px,
@@ -4152,7 +4228,7 @@ export default function StepSolver({
             alignColumns={instance.alignColumns}
           />
           </div>
-          {sideListAll && <SideListPanel list={sideListShown ?? sideListAll} shown={!!sideListShown} />}
+          {sideListAll && sideListFull && <SideListPanel list={sideListShown ?? sideListFull} full={sideListFull} shown={!!sideListShown} />}
           </div>
         )}
         {/* The finished number line, under the work. Its room is held from
@@ -4275,6 +4351,9 @@ export default function StepSolver({
                   ← Previous step
                 </div>
                 <div style={{ padding: "9px 20px", fontSize: 14, fontWeight: 700, border: "1.5px solid transparent", whiteSpace: "nowrap" }}>
+                  ↺ Start over
+                </div>
+                <div style={{ padding: "9px 20px", fontSize: 14, fontWeight: 700, border: "1.5px solid transparent", whiteSpace: "nowrap" }}>
                   {finalButtonLabel}
                 </div>
               </div>
@@ -4383,6 +4462,25 @@ export default function StepSolver({
                   }}
                 >
                   ← Previous step
+                </button>
+              )}
+              {(stepIndex > 0 || revealed) && (
+                <button
+                  onClick={() => setConfirmRestart(true)}
+                  style={{
+                    alignSelf: "flex-start",
+                    background: "var(--paper)",
+                    color: "var(--ink)",
+                    border: "1.5px solid var(--line)",
+                    borderRadius: 999,
+                    padding: "9px 20px",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    whiteSpace: "nowrap",
+                    cursor: "pointer",
+                  }}
+                >
+                  ↺ Start over
                 </button>
               )}
               {revealed && !isLastStep && (
