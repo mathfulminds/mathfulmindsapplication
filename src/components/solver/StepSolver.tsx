@@ -4038,6 +4038,12 @@ export default function StepSolver({
           border-bottom-style: solid !important;
           border-bottom-color: currentColor !important;
         }
+        /* A fraction bar written in the math is as thick as the bars the
+           solver draws itself (the divide-both-sides lines), so every
+           fraction in the work looks the same. */
+        .katex .frac-line {
+          border-bottom-width: 0.06em !important;
+        }
       `}</style>
       {celebration !== null && <Celebration celebrationKey={celebration} onDone={() => setCelebration(null)} />}
       {confirmRestart && (
