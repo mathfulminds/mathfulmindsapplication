@@ -20,7 +20,7 @@ import type { SolverInstance, SolverStep, Choice, GridRow, SideList } from "./ty
 import { BLANK, renderConstant, renderMultiplyTerm, shuffle } from "./isolateVariableCore";
 import type { ComparisonSymbol } from "./inequalityCore";
 import { REL, JOIN, buildTwoPart, withCorrect, dedup } from "./compoundInequalities";
-import { factorPairs, zeroLeftText, zeroLeftLine } from "./quadraticsFactoring";
+import { factorPairs, zeroLeftText, zeroLeftLine, exprLine, EXPR_LAYOUT, type FactorOptions } from "./quadraticsFactoring";
 import { slipNumbers, quadTex, hlNum, generateSlipProblem, type SlipProblem } from "./quadraticsSlipSlide";
 
 const EQ = "=" as unknown as ComparisonSymbol;
@@ -43,8 +43,11 @@ export function buildAustralianInstance(
   prob: SlipProblem,
   x: string = "x",
   // steps that get it ready first (one side 0, a GCF out) - the same as slip and slide
-  prelude?: { initialRow: GridRow; steps: SolverStep[]; trinomial?: { slotId: string; row: GridRow }; zeroLeft?: boolean }
+  prelude?: { initialRow: GridRow; steps: SolverStep[]; trinomial?: { slotId: string; row: GridRow }; zeroLeft?: boolean },
+  opts?: FactorOptions
 ): SolverInstance {
+  // (factoring only: an expression, with nothing to solve at the end)
+  const fo = !!opts?.factorOnly;
   const zl = !!prelude?.zeroLeft;
   const eq0 = (t: string) => (zl ? `0 = ${t}` : `${t} = 0`);
   const { a, b, c } = prob;
@@ -61,8 +64,8 @@ export function buildAustralianInstance(
   // (with no common factor in ax² + bx + c, the two GCFs always multiply back to a)
   if (g1 * g2 !== a) throw new Error("the Australian method doesn't apply");
 
-  const line = (term: string): GridRow =>
-    zl ? zeroLeftLine("0", term) : { cells: [term, BLANK, REL(EQ), "0", BLANK, BLANK, BLANK, BLANK, BLANK], spanNext: [0], noWidthCols: [0, 3] };
+  const line = (term: string, highlight?: GridRow["highlight"]): GridRow =>
+    fo ? exprLine(term, highlight) : zl ? zeroLeftLine("0", term) : { cells: [term, BLANK, REL(EQ), "0", BLANK, BLANK, BLANK, BLANK, BLANK], spanNext: [0], noWidthCols: [0, 3] };
   // (a line that is a fraction: lined up so the "= 0" sits level with its bar)
   const fracLine = (term: string): GridRow => ({ ...line(term), baseline: true });
   const initialRow = prelude ? prelude.initialRow : line(quadTex(a, b, c, x));
@@ -239,7 +242,7 @@ export function buildAustralianInstance(
     rowUpdates: [
       // (crossed out, the two numbers stay bold red)
       { slotId: topSlot, row: fracLine(`${CROSSFRAC}${topMath}`) },
-      { slotId: "aus_done", row: line(inner) },
+      { slotId: "aus_done", row: line(inner, fo ? "success" : undefined) },
     ],
     prompt: `What is ${$(`${redNum(a)} \\div ${redNum(a)}`)}?`,
     choices: withCorrect("1", [
@@ -248,6 +251,9 @@ export function buildAustralianInstance(
     ]),
     explanationOnCorrect: `A number divided by itself is 1, so ${$(quadTex(a, b, c, x))} factors as ${$(inner)}.`,
   });
+
+  // (factoring only: the factored form is the answer)
+  if (fo) return { initialRow, steps, ...EXPR_LAYOUT };
 
   // ---------- 7. zero product, then solve both ----------
   const f1 = { s: a / g1, r: p / g1 };

@@ -4470,7 +4470,8 @@ export default function StepSolver({
                   ← Previous step
                 </button>
               )}
-              {(stepIndex > 0 || revealed) && (
+              {/* (not on a finished problem whose last button already starts it over) */}
+              {(stepIndex > 0 || revealed) && !(revealed && isLastStep && /over/i.test(finalButtonLabel)) && (
                 <button
                   onClick={() => setConfirmRestart(true)}
                   style={{

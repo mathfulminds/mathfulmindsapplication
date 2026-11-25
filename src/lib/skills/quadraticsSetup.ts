@@ -430,6 +430,41 @@ export function generateSlipPractice(): SolverInstance {
   const p = generateSlipProblem();
   return buildQuadraticInstance(practice(p.a, p.b, p.c));
 }
+// ---------- factoring only: ax² + bx + c with nothing to solve ----------
+export interface Trinomial {
+  a: number;
+  b: number;
+  c: number;
+}
+// Why this trinomial can't be factored here, or null when it can.
+export function trinomialError(t: Trinomial): string | null {
+  const { a, b, c } = t;
+  if (a < 1) return "Factoring is supported when the number in front of x² is positive - try one like 2x² + 7x + 3.";
+  if (b === 0 || c === 0) return "Factoring is supported for three terms, like x² + 5x + 6 or 2x² + 7x + 3.";
+  const g = gcd(gcd(a, b), c);
+  if (g > 1) return `Every term here can be divided by ${g}. Taking out a common factor first isn't supported for factoring yet - try ${a / g === 1 ? "" : a / g}x² ${b < 0 ? "-" : "+"} ${Math.abs(b / g) === 1 ? "" : Math.abs(b / g)}x ${c < 0 ? "-" : "+"} ${Math.abs(c / g)}.`;
+  if (a === 1 ? !factorNumbers(b, c) : !slipNumbers(t)) return "This one doesn't factor with whole numbers.";
+  return null;
+}
+export function buildTrinomialInstance(t: Trinomial, x: string = "x", method: LeadingMethod = "slip"): SolverInstance {
+  const err = trinomialError(t);
+  if (err) throw new Error(err);
+  const inst =
+    t.a === 1
+      ? buildFactorInstance({ b: t.b, c: t.c }, x, undefined, { factorOnly: true })
+      : (method === "australian" ? buildAustralianInstance : buildSlipInstance)(t, x, undefined, { factorOnly: true });
+  // (what loads into the typing box when this is picked as an example)
+  const term = (k: number, tail: string, first: boolean) => `${k < 0 ? (first ? "-" : " - ") : first ? "" : " + "}${Math.abs(k) === 1 && tail ? "" : Math.abs(k)}${tail}`;
+  return { ...inst, exampleLatex: `${term(t.a, `${x}^2`, true)}${term(t.b, x, false)}${term(t.c, "", false)}` };
+}
+// (practice: a number in front of x², no common factor)
+export function generateTrinomial(): Trinomial {
+  return generateSlipProblem();
+}
+export function generateTrinomialInstance(): SolverInstance {
+  return buildTrinomialInstance(generateTrinomial());
+}
+
 // A practice problem with a number in front of x², on its own - so the
 // practice page can work the same problem by either method.
 export function generateLeadingProblem(): QuadInput {

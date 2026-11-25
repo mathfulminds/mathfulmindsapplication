@@ -40,8 +40,10 @@ import { buildPowerInstance } from "@/lib/skills/squareCubeRoots";
 import { buildAbsInstance } from "@/lib/skills/absoluteValue";
 import { buildAbsIneqInstance, absIneqAfter } from "@/lib/skills/absoluteValueInequalities";
 import { buildSqInstance, sqValue } from "@/lib/skills/quadraticsSquareRoots";
-import { buildQuadraticInstance, quadProblemError, quadSkill } from "@/lib/skills/quadraticsSetup";
+import { buildQuadraticInstance, quadProblemError, quadSkill, buildTrinomialInstance, trinomialError } from "@/lib/skills/quadraticsSetup";
+import type { LeadingMethod, Trinomial } from "@/lib/skills/quadraticsSetup";
 import { parseExpression, buildExpressionInstance } from "@/lib/skills/combiningExpressions";
+import type { ExprProblem } from "@/lib/skills/combiningExpressions";
 import { planLinearEquation } from "@/lib/skills/linearGeneral";
 import type { CompoundInequality, InequalityPart } from "@/lib/skills/compoundInequalities";
 import { buildOneStepRationalInstance } from "@/lib/skills/oneStepRational";
@@ -87,6 +89,7 @@ export const SKILLS = {
   quadSqrt: { id: "quadSqrt", name: "Quadratics by square roots", href: "/solve/quadratics-square-roots" },
   quadFactor: { id: "quadFactor", name: "Quadratics by factoring", href: "/solve/quadratics-factoring" },
   quadSlip: { id: "quadSlip", name: "Quadratics by factoring (ax² + bx + c)", href: "/solve/quadratics" },
+  factorExpr: { id: "factorExpr", name: "Factoring trinomials (ax² + bx + c)", href: "/solve/factoring-trinomials" },
   quadAus: { id: "quadAus", name: "Quadratics by factoring: Australian method", href: "/solve/quadratics" },
   exprCombine: { id: "exprCombine", name: "Combining like terms (expressions)", href: "/solve/combining-like-terms-expressions" },
   roots: { id: "roots", name: "Square & cube roots", href: "/solve/square-and-cube-roots" },
@@ -919,6 +922,16 @@ function routeSystem(eqs: ParsedEquation[]): SolveOption[] {
   return options;
 }
 
+// "2x² + 7x + 3" as typed: an x² term, then an x term, then a number, all
+// whole numbers, one letter - or null for any other expression.
+function trinomialOf(ex: ExprProblem): { t: Trinomial; x: string } | null {
+  if (ex.terms.length !== 3) return null;
+  const [t2, t1, t0] = ex.terms;
+  if (ex.terms.some((t) => t.coef.den !== 1 || t.style !== "int")) return null;
+  if (t2.vars.length !== 1 || t2.vars[0][1] !== 2 || t1.vars.length !== 1 || t1.vars[0][1] !== 1 || t1.vars[0][0] !== t2.vars[0][0] || t0.vars.length !== 0) return null;
+  return { t: { a: t2.coef.num, b: t1.coef.num, c: t0.coef.num }, x: t2.vars[0][0] };
+}
+
 // ---------- entry point ----------
 
 
@@ -929,6 +942,20 @@ export function routeInput(raw: string): RouteResult {
   if (plain && !/[=<>≤≥≠%]|\\(le|ge|leq|geq|neq|lt|gt)(?![a-zA-Z])|\\(begin|text)/.test(plain) && /[a-zA-Z]/.test(plain.replace(/\\[a-zA-Z]+/g, ""))) {
     const ex = parseExpression(plain.replace(/\\[dt]?frac\s*(\d)\s*(\d)/g, "\\frac{$1}{$2}"));
     if (typeof ex === "string") return { ok: false, error: ex };
+    // A trinomial written in order - "2x² + 7x + 3" - has nothing to
+    // combine: it's a factoring problem.
+    const tri = trinomialOf(ex);
+    if (tri) {
+      const err = trinomialError(tri.t);
+      if (err) return { ok: false, error: err, latex: plain };
+      const sk = SKILLS.factorExpr;
+      const methods: [LeadingMethod, string][] = tri.t.a === 1 ? [["slip", sk.name]] : [["slip", "Slip and slide"], ["australian", "Australian method"]];
+      return {
+        ok: true,
+        latex: plain,
+        options: methods.map(([m, label]) => ({ id: `${sk.id}-${m}`, label, skill: sk, instance: buildTrinomialInstance(tri.t, tri.x, m) })),
+      };
+    }
     const instance = buildExpressionInstance(ex);
     return {
       ok: true,

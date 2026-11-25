@@ -17,7 +17,7 @@ import type { SolverInstance, SolverStep, Choice, GridRow } from "./types";
 import { BLANK, randInt, renderConstant, renderMultiplyTerm, shuffle } from "./isolateVariableCore";
 import type { ComparisonSymbol } from "./inequalityCore";
 import { REL, JOIN, buildTwoPart, withCorrect, dedup } from "./compoundInequalities";
-import { factorNumbers, factorPairs, zeroLeftText, zeroLeftLine } from "./quadraticsFactoring";
+import { factorNumbers, factorPairs, zeroLeftText, zeroLeftLine, exprLine, EXPR_LAYOUT, type FactorOptions } from "./quadraticsFactoring";
 
 export interface SlipProblem {
   a: number; // a x² + b x + c = 0, a ≥ 2
@@ -83,11 +83,14 @@ export function buildSlipInstance(
   prob: SlipProblem,
   x: string = "x",
   // steps that get it ready first, and the line where ax² + bx + c ends up
-  prelude?: { initialRow: GridRow; steps: SolverStep[]; trinomial?: { slotId: string; row: GridRow }; zeroLeft?: boolean }
+  prelude?: { initialRow: GridRow; steps: SolverStep[]; trinomial?: { slotId: string; row: GridRow }; zeroLeft?: boolean },
+  opts?: FactorOptions
 ): SolverInstance {
+  // (factoring only: an expression, with nothing to solve at the end)
+  const fo = !!opts?.factorOnly;
   // (a 0 on the left - "0 = 2x² + 7x + 3" - stays on the left on every line)
   const zl = !!prelude?.zeroLeft;
-  const eq0 = (t: string) => (zl ? `0 = ${t}` : `${t} = 0`);
+  const eq0 = (t: string) => (fo ? t : zl ? `0 = ${t}` : `${t} = 0`);
   const { a, b, c } = prob;
   const fn = slipNumbers(prob);
   if (!fn) throw new Error("slip and slide doesn't apply");
@@ -98,8 +101,8 @@ export function buildSlipInstance(
   const pairText = ([d, e]: [number, number]) => `${d} and ${e}`;
   const chosen = pairs.findIndex(([d, e]) => (d === Math.abs(p) && e === Math.abs(q)) || (d === Math.abs(q) && e === Math.abs(p)));
 
-  const line = (term: string): GridRow =>
-    zl ? zeroLeftLine("0", term) : { cells: [term, BLANK, REL(EQ), "0", BLANK, BLANK, BLANK, BLANK, BLANK], spanNext: [0], noWidthCols: [0, 3] };
+  const line = (term: string, highlight?: GridRow["highlight"]): GridRow =>
+    fo ? exprLine(term, highlight) : zl ? zeroLeftLine("0", term) : { cells: [term, BLANK, REL(EQ), "0", BLANK, BLANK, BLANK, BLANK, BLANK], spanNext: [0], noWidthCols: [0, 3] };
   // the factors' line: the slide back (dividing by a) happens right on it,
   // lined up on the baseline so nothing shifts when the fractions appear
   const factorLine = (term: string): GridRow => ({ ...line(term), baseline: true });
@@ -221,7 +224,7 @@ export function buildSlipInstance(
   const bad1 = `${reducedTex(p, a, x).replace(/\\dfrac\{(\d+)\}\{(\d+)\}/, "$1")}${reducedTex(q, a, x).replace(/\\dfrac\{(\d+)\}\{(\d+)\}/, "$1")}`;
   steps.push({
     stepId: "bottoms_up",
-    rowUpdates: [{ slotId: "bottoms_up", row: line(bottoms) }],
+    rowUpdates: [{ slotId: "bottoms_up", row: line(bottoms, fo ? "success" : undefined) }],
     prompt: "Bottoms slide: the bottom number of a fraction that's left slides to the front of the x. What does it become?",
     choices: withCorrect($(bottoms), dedup($(bottoms), [
       { text: $(bad1), tag: "drops_the_denominator" },
@@ -245,6 +248,9 @@ export function buildSlipInstance(
       })
       .join(", and ")}. So it factors as ${$(bottoms)}.`,
   });
+
+  // (factoring only: the factored form is the answer)
+  if (fo) return { initialRow, steps, ...EXPR_LAYOUT };
 
   // ---------- 6. zero product, then solve both ----------
   const f1 = reduced(p, a);

@@ -55,6 +55,17 @@ export function factorPairs(n: number): [number, number][] {
 }
 
 
+// Factoring only (an expression, nothing to solve): a line is just the
+// expression, written from the left edge of the work, and the work ends at
+// the factored form.
+export interface FactorOptions {
+  factorOnly?: boolean;
+}
+export function exprLine(term: string, highlight?: GridRow["highlight"]): GridRow {
+  return { cells: [BLANK, BLANK, BLANK, term, BLANK, BLANK, BLANK, BLANK, BLANK], spanNext: [3], ...(highlight ? { highlight } : {}) };
+}
+export const EXPR_LAYOUT = { eqColumnIndex: 2, columnCount: 9 };
+
 // A line whose 0 is on the left ("0 = x² + x - 12"): the "=" sits in the
 // same column as in the two equations it splits into ("0 = x + 4 or
 // 0 = x - 3"), so every "=" lines up.
@@ -79,8 +90,10 @@ export function buildFactorInstance(
   x: string = "x",
   // steps that get it ready first; zeroLeft: its 0 is on the left
   // ("0 = x² + x - 12"), and stays there on every line
-  prelude?: { initialRow: GridRow; steps: SolverStep[]; zeroLeft?: boolean }
+  prelude?: { initialRow: GridRow; steps: SolverStep[]; zeroLeft?: boolean },
+  opts?: FactorOptions
 ): SolverInstance {
+  const fo = !!opts?.factorOnly;
   const zl = !!prelude?.zeroLeft;
   const eq0 = (t: string) => (zl ? `0 = ${t}` : `${t} = 0`);
   const { b, c } = prob;
@@ -93,7 +106,7 @@ export function buildFactorInstance(
   const chosen = pairs.findIndex(([d, e]) => (d === Math.abs(p) && e === Math.abs(q)) || (d === Math.abs(q) && e === Math.abs(p)));
   const e = 4;
 
-  const line = (term: string, highlight?: GridRow["highlight"]): GridRow => ({
+  const line = (term: string, highlight?: GridRow["highlight"]): GridRow => fo ? exprLine(term, highlight) : ({
     ...(zl ? zeroLeftLine("0", term) : { cells: [term, BLANK, REL(EQ), "0", BLANK, BLANK, BLANK, BLANK, BLANK], spanNext: [0], noWidthCols: [0, 3] }),
     ...(highlight ? { highlight } : {}),
   });
@@ -157,11 +170,14 @@ export function buildFactorInstance(
   }
   steps.push({
     stepId: "factor_signs",
-    rowUpdates: [{ slotId: "factored", row: line(factored) }],
+    rowUpdates: [{ slotId: "factored", row: line(factored, fo ? "success" : undefined) }],
     prompt: `The two numbers have to multiply to ${c} and add to ${b}. Which signs make that work?`,
     choices: shuffle(signChoices.slice(0, 4)),
     explanationOnCorrect: `${paren(p)} × ${paren(q)} = ${c} and ${paren(p)} + ${paren(q)} = ${b}, so it factors as ${$(factored)}.`,
   });
+
+  // (factoring only: the factored form is the answer)
+  if (fo) return { initialRow, steps, ...EXPR_LAYOUT };
 
   // ---------- 4. zero product: split into two equations ----------
   // (constants in their own columns, like every two-part line)

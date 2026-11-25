@@ -33,6 +33,7 @@ import { generateAbsIneqInstance } from "@/lib/skills/absoluteValueInequalities"
 import { generateSqInstance } from "@/lib/skills/quadraticsSquareRoots";
 import { generateFactorInstance } from "@/lib/skills/quadraticsFactoring";
 import { generateSlipInstance } from "@/lib/skills/quadraticsSlipSlide";
+import { generateTrinomialInstance } from "@/lib/skills/quadraticsSetup";
 import { generateExpressionInstance } from "@/lib/skills/combiningExpressions";
 import { generateClearFractionsInstance, generateMultiStepInequalityInstance } from "@/lib/skills/linearGeneral";
 import { generateOneStepRationalInstance } from "@/lib/skills/oneStepRational";
@@ -132,6 +133,7 @@ export const SKILL_GROUPS: SkillExampleGroup[] = [
       { title: "Quadratics by Square Roots", skill: SKILLS.quadSqrt, generate: generateSqInstance },
       { title: "Quadratics by Factoring", skill: SKILLS.quadFactor, generate: generateFactorInstance },
       { title: "Quadratics by Factoring (ax² + bx + c)", skill: SKILLS.quadSlip, generate: generateSlipInstance },
+      { title: "Factoring Trinomials (ax² + bx + c)", skill: SKILLS.factorExpr, generate: generateTrinomialInstance },
     ],
   },
 ];
