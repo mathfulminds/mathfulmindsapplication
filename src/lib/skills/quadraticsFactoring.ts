@@ -61,8 +61,9 @@ export function factorPairs(n: number): [number, number][] {
 export interface FactorOptions {
   factorOnly?: boolean;
 }
+// (the answer's box goes around the expression only, not the empty columns before it)
 export function exprLine(term: string, highlight?: GridRow["highlight"]): GridRow {
-  return { cells: [BLANK, BLANK, BLANK, term, BLANK, BLANK, BLANK, BLANK, BLANK], spanNext: [3], ...(highlight ? { highlight } : {}) };
+  return { cells: [BLANK, BLANK, BLANK, term, BLANK, BLANK, BLANK, BLANK, BLANK], spanNext: [3], ...(highlight ? { highlight, ...(highlight === "success" ? { boxCols: [[3]] } : {}) } : {}) };
 }
 export const EXPR_LAYOUT = { eqColumnIndex: 2, columnCount: 9 };
 
